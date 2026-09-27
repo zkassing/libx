@@ -56,6 +56,12 @@ export interface Shot {
   duration: number;
   /** 故事板中是否已确认（确认后才进入后续生成） */
   confirmed: boolean;
+  /** P3：该镜头的分镜图节点 id（已创建则复用） */
+  imageNodeId?: string;
+  /** P4：该镜头的图生视频节点 id */
+  videoNodeId?: string;
+  /** P5：是否已纳入成片 */
+  inFilm?: boolean;
 }
 
 /** `@` 引用（节点 / 素材 / 模型） */
