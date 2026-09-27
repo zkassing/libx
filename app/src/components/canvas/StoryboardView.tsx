@@ -27,7 +27,6 @@ type BusyKind = "image" | "video";
 
 export function StoryboardView() {
   const nodes = useCanvasStore((s) => s.nodes);
-  const edges = useCanvasStore((s) => s.edges);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const appendGraph = useCanvasStore((s) => s.appendGraph);
   const runNode = useCanvasStore((s) => s.runNode);
@@ -169,10 +168,8 @@ export function StoryboardView() {
                   {entry.shots.map((shot) => (
                     <ShotTrack
                       key={shot.id}
-                      nodeId={entry.nodeId}
                       shot={shot}
                       nodes={nodes}
-                      edges={edges}
                       busy={busy}
                       onToggleConfirm={() => toggleConfirm(entry.nodeId, shot)}
                       onGenImage={() => genImages(entry.nodeId)}
@@ -193,7 +190,6 @@ export function StoryboardView() {
 
 /* 单个镜头：三列轨道 */
 function ShotTrack({
-  nodeId,
   shot,
   nodes,
   busy,
@@ -201,10 +197,8 @@ function ShotTrack({
   onGenImage,
   onGenVideo,
 }: {
-  nodeId: string;
   shot: Shot;
   nodes: ReturnType<typeof useCanvasStore.getState>["nodes"];
-  edges: ReturnType<typeof useCanvasStore.getState>["edges"];
   busy: Record<string, BusyKind>;
   onToggleConfirm: () => void;
   onGenImage: () => void;

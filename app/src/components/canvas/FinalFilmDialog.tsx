@@ -161,7 +161,6 @@ export function FinalFilmDialog({
                     i === cur ? "border-[#1677ff]" : "border-transparent opacity-60 hover:opacity-100",
                   ].join(" ")}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <video src={c.url} className="size-full object-cover" muted preload="metadata" />
                   <span className="absolute bottom-0 right-0 rounded-tl bg-black/70 px-1 text-[9px] text-white">
                     {c.index}
