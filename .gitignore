@@ -1,0 +1,15 @@
+# 本地 SQLite 数据库（不入版本）
+.data/
+
+# 截图 / 导出
+_shots/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+
+# 依赖兜底
+node_modules/

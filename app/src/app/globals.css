@@ -1,0 +1,215 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+html {
+  color-scheme: dark;
+}
+
+:root {
+  --radius: 0.75rem;
+
+  --background: #0a0a0b;
+  --foreground: #e9e9ec;
+
+  --card: #141416;
+  --card-foreground: #e9e9ec;
+
+  --popover: #1a1a1d;
+  --popover-foreground: #e9e9ec;
+
+  --primary: #1677ff;
+  --primary-foreground: #ffffff;
+
+  --secondary: #232327;
+  --secondary-foreground: #e9e9ec;
+
+  --muted: #1c1c20;
+  --muted-foreground: #8b8b95;
+
+  --accent: #26262b;
+  --accent-foreground: #ffffff;
+
+  --destructive: #f5484a;
+
+  --border: rgba(255, 255, 255, 0.09);
+  --input: rgba(255, 255, 255, 0.13);
+  --ring: #1677ff;
+
+  /* LibTV 风格面板色（按参考截图采样） */
+  --canvas: #141414;
+  --panel: #262626;
+  --panel-2: #2c2c2c;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+  }
+}
+
+body {
+  font-family: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  overscroll-behavior: none;
+}
+
+/* ---------- React Flow：LibTV 化 ---------- */
+.react-flow {
+  --xy-background-color: var(--canvas);
+}
+
+.react-flow__node {
+  font-family: inherit;
+  cursor: default;
+}
+
+.react-flow__node-group {
+  pointer-events: all;
+}
+
+/* 端口：默认隐形，鼠标移入卡片才出现，并在 ±30px 半圆弧内跟随鼠标 */
+.react-flow__handle {
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 9999px;
+  background: #1c1c20;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease, top 0.08s ease-out, left 0.08s ease-out,
+    right 0.08s ease-out, transform 0.15s ease;
+}
+.react-flow__handle::after {
+  content: "+";
+  transform: translateY(-0.5px);
+}
+.react-flow__node:hover .react-flow__handle,
+.connect-dragging .react-flow__handle,
+.react-flow__handle.connectionindicator:hover {
+  opacity: 1;
+}
+.react-flow__handle:hover {
+  background: #26262b;
+}
+
+/* 拖线时：合法目标端口变绿，不合法变红（React Flow 会打 .connectingto / .valid 类） */
+.react-flow__handle.connectingto {
+  opacity: 1;
+}
+.react-flow__handle.connectingto.valid {
+  border-color: rgba(43, 214, 123, 0.85);
+  background: rgba(43, 214, 123, 0.16);
+  color: rgb(134, 239, 172);
+}
+.react-flow__handle.connectingto:not(.valid) {
+  border-color: rgba(239, 68, 68, 0.8);
+  background: rgba(239, 68, 68, 0.14);
+  color: rgb(252, 165, 165);
+}
+.react-flow__handle.connectingto:not(.valid)::after {
+  content: "×";
+}
+/* 注意：hover 时必须保留 React Flow 的 translate，否则 + 会跳 9px 而丢失 hover，导致无限闪烁 */
+.react-flow__handle-left:hover {
+  transform: translate(-50%, -50%) scale(1.12);
+}
+.react-flow__handle-right:hover {
+  transform: translate(50%, -50%) scale(1.12);
+}
+
+.react-flow__edge-path {
+  stroke-width: 1.5;
+  stroke-dasharray: none;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke-width: 1.8;
+}
+
+.react-flow__selection {
+  background: rgba(22, 119, 255, 0.08);
+  border: 1px solid rgba(22, 119, 255, 0.55);
+}
+
+.react-flow__attribution {
+  background: transparent;
+  font-size: 10px;
+}
+.react-flow__attribution a {
+  color: rgba(255, 255, 255, 0.18);
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* 拖拽 / 平移性能优化                                                  */
+/* 交互进行时（ReactFlow 容器带 .aiteach-interacting），暂停其中一切      */
+/* 非必要的动画与过渡，把主线程 / 合成器全部让给拖拽，保证跟手。           */
+/* ------------------------------------------------------------------ */
+.react-flow.aiteach-interacting,
+.react-flow.aiteach-interacting * {
+  animation: none !important;
+  transition: none !important;
+  /* 只合成、不重绘：拖拽只改 transform，无需反复计算样式与重绘 */
+  will-change: auto;
+}
+

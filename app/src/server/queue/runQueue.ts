@@ -1,0 +1,289 @@
+import { prisma } from "@/lib/prisma";
+import { getProvider } from "@/server/providers/registry";
+import type { GenResult } from "@/server/providers/types";
+import type { FlowNodeData } from "@/types";
+import { runEventBus } from "./eventBus";
+import { hashInput } from "./inputHash";
+import { recordGeneratedAsset } from "./recordAsset";
+import {
+  loadOwnedNode,
+  resolveUpstreams,
+  resolveNodeVariables,
+} from "./resolveRunInput";
+import type { VariableValues } from "@/lib/variableTypes";
+
+/* ------------------------------------------------------------------ */
+/* RunQueue：进程内任务队列 + 状态机（T2.3）                             */
+/* ------------------------------------------------------------------ */
+/* 状态机：                                                             */
+/*   queued → running(progress) → succeeded | failed                    */
+/* - run API 只负责鉴权 + 创建 NodeRun(queued) + enqueue，立即返回；       */
+/* - worker 在后台限并发执行；上游就绪检查放在“执行时”（而非入队时），      */
+/*   这样整组批量入队时，排在前面的上游先跑完，后面的节点执行时自然就绪。    */
+/* - 中间进度只走事件总线，不落库（避免与终态写库竞态）；                   */
+/*   终态在一个事务里更新 NodeRun 并把产物写回 CanvasNode。                */
+/* ------------------------------------------------------------------ */
+
+/** 最大并发执行数（Mock 耗时任务，2 路并发足够演示又不压垮单机） */
+const MAX_CONCURRENCY = 2;
+
+interface QueueItem {
+  runId: string;
+}
+
+export interface RunQueue {
+  /** 已创建好的 NodeRun(queued) 入队，等待后台执行 */
+  enqueue(runId: string): void;
+  /** 当前队列中等待 + 正在执行的任务数（排查用） */
+  size(): { waiting: number; active: number };
+}
+
+function createQueue(): RunQueue {
+  const waiting: QueueItem[] = [];
+  const active = new Set<string>();
+
+  /** 发布事件 */
+  const emit = (
+    runId: string,
+    type: Parameters<typeof runEventBus.emit>[0]["type"],
+    extra: Partial<Parameters<typeof runEventBus.emit>[0]> = {},
+  ) => {
+    const run = cache.get(runId);
+    runEventBus.emit({
+      type,
+      runId,
+      nodeId: run?.nodeId ?? "",
+      workflowId: run?.workflowId ?? "",
+      at: Date.now(),
+      ...extra,
+    });
+  };
+
+  // runId → { nodeId, workflowId }（emit 时用，避免每个事件都查库）
+  const cache = new Map<string, { nodeId: string; workflowId: string }>();
+
+  /** 把任务标记为失败（并发布事件） */
+  const fail = async (
+    runId: string,
+    message: string,
+  ) => {
+    await prisma.nodeRun.update({
+      where: { id: runId },
+      data: { status: "failed", error: message, progress: 0, finishedAt: new Date() },
+    });
+    emit(runId, "failed", { progress: 0, error: message });
+  };
+
+  /** worker：执行一个任务 */
+  const process = async (item: QueueItem) => {
+    const { runId } = item;
+    active.add(runId);
+    try {
+      const run = await prisma.nodeRun.findUnique({ where: { id: runId } });
+      if (!run) return; // 任务可能已被清理
+      const { nodeId, workflowId } = run;
+      cache.set(runId, { nodeId, workflowId });
+
+      // 1) 执行时再解析一次节点与上游（批量入队时上游此刻可能刚好跑完）
+      const loaded = await loadOwnedNode(nodeId, run.userId);
+      if ("error" in loaded) {
+        await fail(runId, loaded.error.message);
+        return;
+      }
+      let nodeData: FlowNodeData;
+      try {
+        nodeData = JSON.parse(loaded.row.data) as FlowNodeData;
+      } catch {
+        await fail(runId, "节点数据损坏");
+        return;
+      }
+
+      const { upstreams, pending } = await resolveUpstreams(workflowId, nodeId);
+      if (pending.length > 0) {
+        await fail(runId, `上游节点还没生成产物：${pending.join("、")}`);
+        return;
+      }
+
+      // 1.5) 变量渲染：从本次运行 input 取提交值，回退老师默认，渲染 {{key}}
+      let submittedVars: VariableValues = {};
+      try {
+        const snap = run.input ? JSON.parse(run.input) as { variables?: VariableValues } : null;
+        if (snap?.variables && typeof snap.variables === "object") {
+          submittedVars = snap.variables;
+        }
+      } catch {
+        // 快照损坏时退回仅默认值
+      }
+      const vres = await resolveNodeVariables(workflowId, nodeData, submittedVars);
+      if (vres.missing.length > 0) {
+        await fail(
+          runId,
+          `还有变量没填写：${vres.missing.map((k) => `{{${k}}}`).join("、")}`,
+        );
+        return;
+      }
+      // 后续统一用渲染后的提示词（哈希 / provider / 画布回写）
+      const renderedData: FlowNodeData = { ...nodeData, prompt: vres.prompt };
+
+      // 2) queued → running 之前先查缓存：同节点同样输入且上次成功 → 直接复用
+      const inputHash = hashInput({
+        nodeKind: renderedData.kind,
+        prompt: renderedData.prompt,
+        params: renderedData.params as Record<string, unknown> | undefined,
+        upstreams: upstreams.map((u) => ({ kind: u.kind, summary: u.summary })),
+      });
+
+      const cached = await prisma.nodeRun.findFirst({
+        where: {
+          nodeId,
+          status: "succeeded",
+          inputHash,
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (cached?.output) {
+        const cachedResult = JSON.parse(cached.output) as GenResult;
+        const finishedAt = new Date();
+        await prisma.nodeRun.update({
+          where: { id: runId },
+          data: {
+            status: "succeeded",
+            progress: 100,
+            cost: 0,
+            inputHash,
+            output: cached.output,
+            finishedAt,
+          },
+        });
+        // 产物已在画布节点上（缓存来源就是它/或同输入的产物）；确保画布节点也是成功态
+        await prisma.canvasNode.updateMany({
+          where: { id: nodeId },
+          data: {
+            data: JSON.stringify({
+              ...nodeData,
+              status: "succeeded",
+              progress: 100,
+              output: cachedResult,
+            } satisfies FlowNodeData),
+          },
+        });
+        emit(runId, "cached", {
+          progress: 100,
+          output: cachedResult,
+          cached: true,
+        });
+        return;
+      }
+
+      // 未命中缓存：标记 running，记下本次 inputHash（结束时随产物一起成为可命中项）
+      // worker 自行估算积分（与 run route 同口径，真实成功要写入实际 cost）
+      const provider0 = getProvider(nodeData.kind);
+      const actualCost = provider0.costEstimate({
+        nodeId,
+        nodeKind: nodeData.kind,
+        prompt: vres.prompt,
+        title: nodeData.title,
+        params: nodeData.params,
+        upstreams,
+      });
+      await prisma.nodeRun.update({
+        where: { id: runId },
+        data: { status: "running", startedAt: new Date(), inputHash, cost: actualCost },
+      });
+      emit(runId, "started", { progress: 0 });
+
+      // 3) 执行 provider（中间进度只发事件）
+      const provider = getProvider(nodeData.kind);
+      const result: GenResult = await provider.generate(
+        {
+          nodeId,
+          nodeKind: nodeData.kind,
+          prompt: vres.prompt,
+          title: nodeData.title,
+          params: nodeData.params as Record<string, unknown> | undefined,
+          upstreams,
+        },
+        {
+          runId,
+          onProgress: (progress) => emit(runId, "progress", { progress }),
+        },
+      );
+
+      // 4) 终态事务：NodeRun succeeded + 产物写回 CanvasNode
+      const finishedAt = new Date();
+      await prisma.$transaction([
+        prisma.nodeRun.update({
+          where: { id: runId },
+          data: {
+            status: "succeeded",
+            progress: 100,
+            output: JSON.stringify(result),
+            inputHash,
+            cost: actualCost,
+            finishedAt,
+          },
+        }),
+        prisma.canvasNode.update({
+          where: { id: nodeId },
+          data: {
+            data: JSON.stringify({
+              ...nodeData,
+              status: "succeeded",
+              progress: 100,
+              output: result,
+            } satisfies FlowNodeData),
+          },
+        }),
+      ]);
+      // 真实生成成功：媒体产物自动进入「生成历史」，并补项目封面
+      await recordGeneratedAsset({
+        userId: run.userId,
+        workflowId,
+        nodeId,
+        runId,
+        nodeKind: nodeData.kind,
+        result,
+      }).catch(() => {});
+      emit(runId, "succeeded", { progress: 100, output: result });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "生成失败";
+      await fail(runId, message).catch(() => {});
+    } finally {
+      active.delete(runId);
+      cache.delete(runId);
+      pump();
+    }
+  };
+
+  /** 调度：只要有空位就从等待队列取下一个执行 */
+  const pump = () => {
+    while (active.size < MAX_CONCURRENCY && waiting.length > 0) {
+      const item = waiting.shift()!;
+      void process(item);
+    }
+  };
+
+  return {
+    enqueue(runId) {
+      waiting.push({ runId });
+      pump();
+    },
+    size: () => ({ waiting: waiting.length, active: active.size }),
+  };
+}
+
+const KEY = "__aiteachRunQueue__";
+const globalForQueue = globalThis as unknown as Record<string, RunQueue | undefined>;
+
+export const runQueue: RunQueue =
+  globalForQueue[KEY] ?? (globalForQueue[KEY] = createQueue());
+
+/** 启动时恢复：把上次进程异常退出留下的 running 任务标记为失败（避免永久卡住） */
+export async function recoverStaleRuns() {
+  const stale = await prisma.nodeRun.updateMany({
+    where: { status: { in: ["running", "queued"] } },
+    data: { status: "failed", error: "服务重启，任务中断", finishedAt: new Date() },
+  });
+  return stale.count;
+}

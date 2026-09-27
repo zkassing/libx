@@ -1,0 +1,281 @@
+// AI 教学画布 · Prisma schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String     @id @default(cuid())
+  name          String?
+  email         String?    @unique
+  emailVerified DateTime?
+  image         String?
+  // 邮箱密码登录用（密码是 bcrypt 哈希，绝不明文）
+  passwordHash  String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  accounts      Account[]
+  sessions      Session[]
+  workflows     Workflow[]
+  assets        Asset[]
+  authoredSkills Skill[]
+  favoriteSkills SkillFavorite[]
+}
+
+// Auth.js 标准表：一个用户可绑多种登录方式（以后接 OAuth 直接能用）
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+// Auth.js 数据库会话（本期用 JWT strategy，这张表先建好备用）
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/* ================= M2：云端画布持久化 ================= */
+
+/** 一张工作流 = 一个画布（对应 /canvas/[id]） */
+model Workflow {
+  id        String       @id @default(cuid())
+  title     String       @default("未命名工作流")
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nodes     CanvasNode[]
+  edges     CanvasEdge[]
+  assetFolders AssetFolder[]
+  variables Variable[]
+  /** 首页项目卡片封面（默认取画布内最近的图片/视频产物） */
+  coverUrl  String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([userId])
+}
+
+/**
+ * 画布节点。id 沿用前端 React Flow 生成的 id（边的 source/target 直接引用它）。
+ * 位置/尺寸/样式/数据整体以 JSON 存，避免把 RF 结构拆成一堆列。
+ */
+model CanvasNode {
+  id         String   @id
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  type       String
+  x          Float
+  y          Float
+  parentId   String?
+  data       String   // JSON：FlowNodeData
+  style      String?  // JSON
+  measured   String?  // JSON
+  index      Int      @default(0)
+
+  @@index([workflowId])
+}
+
+/** 画布连线。id 同样沿用前端 id */
+model CanvasEdge {
+  id           String   @id
+  workflowId   String
+  workflow     Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  source       String
+  target       String
+  sourceHandle String?
+  targetHandle String?
+  data         String?  // JSON
+  index        Int      @default(0)
+
+  @@index([workflowId])
+}
+
+/* ------------ M2：单节点运行记录（T2.2） ------------ */
+
+/**
+ * 一次“单节点运行”的记录。
+ * 精简独立版：暂不引入整组 Run 聚合（M3 工作流引擎再加 Run 表）。
+ * 状态机：queued → running → succeeded | failed（T2.3 队列接管 queued/running）。
+ */
+model NodeRun {
+  id         String    @id @default(cuid())
+  /** 被运行的画布节点（沿用 CanvasNode id） */
+  nodeId     String
+  workflowId String
+  userId     String
+  status      String   @default("queued") // queued|running|succeeded|failed
+  progress    Int      @default(0)
+  /** 本次生成的输入快照（提示词 / 参数 / 上游摘要） */
+  input       String?  // JSON
+  /** 生成产物（NodeOutput） */
+  output      String?  // JSON
+  /** 消耗积分 */
+  cost        Int      @default(0)
+  error       String?
+  /** T2.9 输入哈希缓存用，本期先留空 */
+  inputHash   String?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([nodeId])
+  @@index([workflowId])
+  @@index([userId])
+}
+
+/* ------------ M2：资产（三层，统一一张表，用 source 区分） ------------ */
+
+/**
+ * 资产。三层含义：
+ *  - source="generated" 生成历史：节点每次产出图/视频/音频时**自动**落一条（全局，跨项目可查）
+ *  - source="library"   个人资产库：用户手动收藏 / 本地上传（全局）
+ *  - source="project"   项目资产：仅在某张画布里管理的素材（待分类资产）
+ *
+ * generated 资产会带上 workflowId + nodeId + runId，可回溯来源；
+ * project 资产带 workflowId；library 资产 workflowId 为空。
+ */
+model Asset {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /** generated | library | project */
+  source       String    @default("generated")
+  /** image | video | audio | text */
+  kind         String
+  title        String
+  /** 媒体地址（/uploads/... 或 data URL）；文本类可空 */
+  url          String?
+  /** 文本内容（kind=text 时） */
+  text         String?
+  mimeType     String?
+  /** 文件大小（字节），可空 */
+  size         Int?
+  /** 项目资产 / 生成历史可回溯到具体画布 */
+  workflowId   String?
+  /** 生成历史：来源节点 id（CanvasNode id） */
+  nodeId       String?
+  /** 生成历史：来源 NodeRun id */
+  runId        String?
+  /** 收藏 / 评分（预留，对应“所有评级”筛选） */
+  rating       Int?
+  /** 项目资产可放进文件夹；null=待分类 */
+  folderId     String?
+  folder       AssetFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, source])
+  @@index([workflowId])
+  @@index([kind])
+  @@index([nodeId])
+  @@index([folderId])
+}
+
+/**
+ * 项目资产文件夹（画布内「资产」tab 的文件夹树）。
+ * 仅服务于项目本地文件管理，与全局 /assets 的生成历史无关。
+ */
+model AssetFolder {
+  id         String    @id @default(cuid())
+  workflowId String
+  workflow   Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  name       String
+  parentId   String?
+  parent     AssetFolder? @relation("AssetFolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children   AssetFolder[] @relation("AssetFolderTree")
+  assets     Asset[]
+  createdAt  DateTime  @default(now())
+
+  @@index([workflowId])
+  @@index([parentId])
+}
+
+/**
+ * 工作流级变量（T3.5）。老师在模板里预设定义；
+ * source=teacher 表示老师锁定默认值，student 表示学生在引导模式填写。
+ * 节点提示词里用 {{key}} 引用，运行前由变量值渲染替换。
+ */
+model Variable {
+  id         String   @id @default(cuid())
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  key        String
+  label      String
+  type       String   @default("text") // text|number|select|asset
+  default    String?
+  options    String? // select 的候选项，JSON 字符串数组
+  required   Boolean  @default(false)
+  source     String   @default("student") // teacher|student
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([workflowId, key])
+  @@index([workflowId])
+}
+
+/**
+ * Skill：场景化成片模板（对齐 LibTV）。
+ * 一句话灵感 + 一套预设流程 → 驱动画布产出成片。
+ * official=true 为平台内置（userId 可空）；用户发布的为自定义。
+ */
+model Skill {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  category    String   @default("general") // film|ad|drama|anime|music|social|general
+  coverUrl    String?
+  /** 视频/图片角标类型（卡片右上角） */
+  outputKind  String   @default("video") // video|image
+  summary     String?
+  description String?
+  /** 使用场景 */
+  scenes      String?
+  /** 如何使用 */
+  howTo       String?
+  /** 输出内容说明 */
+  outputs     String?
+  /** 模板画布（nodes/edges JSON，加载时重映射 id） */
+  template    String?
+  authorId    String?
+  author      User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  official    Boolean  @default(false)
+  usageCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  favoritedBy SkillFavorite[]
+
+  @@index([category])
+}
+
+/** 用户收藏 Skill（多对多） */
+model SkillFavorite {
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skillId   String
+  skill     Skill   @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, skillId])
+  @@index([skillId])
+}
