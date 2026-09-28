@@ -458,6 +458,39 @@ export function MarkingDialog({
   );
 }
 
+/**
+ * 把框选区域在浏览器里裁剪 + 压缩成 JPEG dataURL：
+ * 识别请求只带这块小图（几十 KB），比传整张原图（几 MB base64）快一个量级，
+ * 且 VLM 只需聚焦该区域，识别更准。
+ */
+async function cropRegionToDataUrl(
+  imageUrl: string,
+  rect: { x: number; y: number; w: number; h: number },
+): Promise<string> {
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error("图片加载失败"));
+    img.src = imageUrl;
+  });
+  const nw = img.naturalWidth || 1;
+  const nh = img.naturalHeight || 1;
+  const sx = rect.x * nw;
+  const sy = rect.y * nh;
+  const sw = Math.max(1, rect.w * nw);
+  const sh = Math.max(1, rect.h * nh);
+  // 最长边压到 640px（VLM 识别绰绰有余）；小区域不放大
+  const scale = Math.min(1, 640 / Math.max(sw, sh));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sw * scale));
+  canvas.height = Math.max(1, Math.round(sh * scale));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas 不可用");
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
 /** 框选交互主体（持有全部拖拽/识别状态，随 Dialog 开关挂载/卸载） */
 function MarkingBody({
   source,
@@ -519,10 +552,17 @@ function MarkingBody({
     setIdentifying(true);
     setError(null);
     try {
+      // 优先浏览器端裁剪小图上传（快）；失败（跨域污染等）退回整图+坐标让服务端裁
+      let body: Record<string, unknown>;
+      try {
+        body = { image: await cropRegionToDataUrl(source.imageUrl, rect) };
+      } catch {
+        body = { imageUrl: source.imageUrl, rect };
+      }
       const res = await fetch("/api/marks/identify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageUrl: source.imageUrl, rect }),
+        body: JSON.stringify(body),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.label) throw new Error(j.error ?? "识别失败");
