@@ -101,6 +101,15 @@ function buildTextResult(input: GenInput): GenResult {
       ? `${text}\n\n/* --- 上游上下文 ---\n${digest}\n*/${shotBlock}`
       : `${text}${shotBlock}`,
     shots,
+    // 动作契约（对齐 LibTV 实测结构，AutoLink 消费；action_input 用干净提示词）
+    action: {
+      action: kind === "script" ? "generate_storyboard" : "text_to_image",
+      action_input: label,
+      supplementary: {
+        style: "电影级",
+        aspect_ratio: String(params?.aspectRatio ?? "16:9"),
+      },
+    },
   };
 }
 

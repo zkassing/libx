@@ -26,6 +26,7 @@ model User {
   assets        Asset[]
   authoredSkills Skill[]
   favoriteSkills SkillFavorite[]
+  characters    Character[]
 }
 
 // Auth.js 标准表：一个用户可绑多种登录方式（以后接 OAuth 直接能用）
@@ -288,4 +289,23 @@ model SkillFavorite {
 
   @@id([userId, skillId])
   @@index([skillId])
+}
+
+/**
+ * 角色库（LibTV「角色库」）：用户保存的角色资产。
+ * 插入提示词时：角色名 + 形象描述进上下文，参考图进图生图/图生视频。
+ */
+model Character {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  /** 形象描述（插入提示词 / 喂给模型保证一致性） */
+  description String?
+  /** 参考图（/uploads/... 或远端 URL） */
+  imageUrl    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
 }

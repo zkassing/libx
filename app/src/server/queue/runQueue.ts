@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getProvider } from "@/server/providers/registry";
+import { applyAutoLink } from "@/server/providers/autoLink";
 import type { GenResult } from "@/server/providers/types";
 import type { FlowNodeData } from "@/types";
 import { runEventBus } from "./eventBus";
@@ -9,6 +10,7 @@ import {
   loadOwnedNode,
   resolveUpstreams,
   resolveNodeVariables,
+  resolveRefs,
 } from "./resolveRunInput";
 import type { VariableValues } from "@/lib/variableTypes";
 
@@ -194,12 +196,38 @@ function createQueue(): RunQueue {
       // 后续统一用渲染后的提示词（哈希 / provider / 画布回写）
       const renderedData: FlowNodeData = { ...nodeData, prompt: vres.prompt };
 
+      // 1.6) AutoLink（对齐 LibTV）：上游文本/脚本产出的动作契约驱动下游。
+      // 必须在算哈希之前注入，缓存键才与真实输入一致。
+      const auto = applyAutoLink(
+        renderedData.kind,
+        renderedData.prompt,
+        renderedData.params as Record<string, unknown> | undefined,
+        upstreams,
+      );
+      const effectivePrompt = auto.prompt;
+
+      // 1.7) `@引用` 解析（参考/标记/角色库）：进上下文、参考图与模型覆盖。
+      // 与 AutoLink 同理：必须在算哈希之前注入，缓存键才与真实输入一致。
+      const refRes = await resolveRefs(nodeData, run.userId);
+      const seenUp = new Set(upstreams.map((u) => u.nodeId));
+      const mergedUpstreams = [
+        ...upstreams,
+        ...refRes.upstreams.filter((u) => !seenUp.has(u.nodeId)),
+      ];
+      const effectiveParams = {
+        ...(auto.params ??
+          (renderedData.params as Record<string, unknown> | undefined)),
+        ...(refRes.modelOverride ? { model: refRes.modelOverride } : {}),
+      };
+
       // 2) queued → running 之前先查缓存：同节点同样输入且上次成功 → 直接复用
       const inputHash = hashInput({
         nodeKind: renderedData.kind,
-        prompt: renderedData.prompt,
-        params: renderedData.params as Record<string, unknown> | undefined,
-        upstreams: upstreams.map((u) => ({ kind: u.kind, summary: u.summary })),
+        prompt: effectivePrompt,
+        params: effectiveParams,
+        upstreams: mergedUpstreams.map((u) => ({ kind: u.kind, summary: u.summary })),
+        refs: (nodeData.refs ?? []).map((r) => ({ type: r.type, id: r.id })),
+        referenceImages: refRes.referenceImages,
       });
 
       const cached = await prisma.nodeRun.findFirst({
@@ -251,10 +279,11 @@ function createQueue(): RunQueue {
       const actualCost = provider0.costEstimate({
         nodeId,
         nodeKind: nodeData.kind,
-        prompt: vres.prompt,
+        prompt: effectivePrompt,
         title: nodeData.title,
-        params: nodeData.params,
-        upstreams,
+        params: effectiveParams,
+        upstreams: mergedUpstreams,
+        referenceImages: refRes.referenceImages,
       });
       await prisma.nodeRun.update({
         where: { id: runId },
@@ -268,10 +297,11 @@ function createQueue(): RunQueue {
         {
           nodeId,
           nodeKind: nodeData.kind,
-          prompt: vres.prompt,
+          prompt: effectivePrompt,
           title: nodeData.title,
-          params: nodeData.params as Record<string, unknown> | undefined,
-          upstreams,
+          params: effectiveParams,
+          upstreams: mergedUpstreams,
+          referenceImages: refRes.referenceImages,
         },
         {
           runId,

@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { ARK_BASE_URL, arkApiKey } from "./config";
 
 /* ------------------------------------------------------------------ */
@@ -84,9 +86,33 @@ export interface ArkChatOptions {
   json?: boolean;
 }
 
+/** 消息内容：纯文本，或多模态分段（text + image_url） */
+export type ArkMessageContent = string | Array<Record<string, unknown>>;
+
+/**
+ * 把本地/内联图片转成 ARK 可消费的形态：
+ *  - /uploads/...（本地落盘产物）→ 读文件转 base64 data URL（方舟够不到 localhost）
+ *  - data: / http(s): 原样透传
+ */
+export async function toArkImageRef(url: string): Promise<string> {
+  if (url.startsWith("data:") || /^https?:\/\//.test(url)) return url;
+  if (url.startsWith("/")) {
+    const file = path.join(process.cwd(), "public", url);
+    const buf = await readFile(file);
+    const ext = url.split(".").pop()?.toLowerCase() ?? "jpeg";
+    const mime =
+      ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+    return `data:${mime};base64,${buf.toString("base64")}`;
+  }
+  return url;
+}
+
 export async function arkChat(
   model: string,
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  messages: Array<{
+    role: "system" | "user" | "assistant";
+    content: ArkMessageContent;
+  }>,
   opts: ArkChatOptions = {},
 ): Promise<string> {
   const data = (await arkFetch("/chat/completions", {
@@ -115,6 +141,8 @@ export interface ArkImageOptions {
   size?: string;
   count?: number;
   watermark?: boolean;
+  /** 参考图（图生图/多图参考）：本地路径会先转 base64（Seedream 4.0+ 支持） */
+  referenceImages?: string[];
   signal?: AbortSignal;
 }
 
@@ -123,6 +151,11 @@ export async function arkImage(
   prompt: string,
   opts: ArkImageOptions = {},
 ): Promise<string[]> {
+  // 参考图：本地产物统一转 base64 内联，避免方舟回源不到 localhost
+  const refs = opts.referenceImages?.length
+    ? await Promise.all(opts.referenceImages.map(toArkImageRef))
+    : undefined;
+
   const data = (await arkFetch("/images/generations", {
     method: "POST",
     signal: opts.signal,
@@ -133,6 +166,8 @@ export async function arkImage(
       // 只要 URL（b64_json 会让响应体巨大，没必要）
       response_format: "url",
       watermark: opts.watermark ?? false,
+      // 图生图/参考图：单张传字符串，多张传数组（Seedream 4.0+ 多图参考）
+      ...(refs?.length ? { image: refs.length === 1 ? refs[0] : refs } : {}),
       ...(opts.count && opts.count > 1 ? { sequential_image_generation: "auto" } : {}),
     }),
   })) as { data?: Array<{ url?: string; b64_json?: string }> };

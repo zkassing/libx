@@ -1,5 +1,5 @@
 import type { Edge, Node } from "@xyflow/react";
-import { NODE_SIZE, type FlowNodeData, type Shot } from "@/types";
+import { NODE_SIZE, flowNodeSize, type FlowNodeData, type Shot } from "@/types";
 
 /* ------------------------------------------------------------------ */
 /* 成片流水线 P3/P4：从已确认分镜创建分镜图节点 / 图生视频节点             */
@@ -33,12 +33,15 @@ function makeNode(
   prompt: string,
   extra?: Partial<FlowNodeData>,
 ): Node<FlowNodeData> {
+  // style/measured 必须按真实渲染尺寸（图片/视频的卡片随画幅比例，
+  // 与 NODE_SIZE 写死值不同），否则连线锚点会偏到卡片外
+  const dims = flowNodeSize(kind, extra?.params?.aspectRatio);
   return {
     id: localId(kind),
     type: kind,
     position,
-    measured: { width: NODE_SIZE[kind].w, height: NODE_SIZE[kind].h },
-    style: { width: NODE_SIZE[kind].w, height: NODE_SIZE[kind].h },
+    measured: { width: dims.w, height: dims.h },
+    style: { width: dims.w, height: dims.h },
     data: {
       kind,
       title,

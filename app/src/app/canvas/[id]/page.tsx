@@ -8,7 +8,6 @@ import { BottomDock } from "@/components/canvas/BottomDock";
 import { StoryboardView } from "@/components/canvas/StoryboardView";
 import { useCanvasPrefs } from "@/stores/canvasPrefs";
 import { AgentPanel } from "@/components/panel/AgentPanel";
-import { NodeInspector } from "@/components/canvas/NodeInspector";
 import { Sidebar, CollapsedHeader } from "@/components/canvas/Sidebar";
 import { ToolboxHost } from "@/components/canvas/Toolbox";
 import { PublishSkillHost } from "@/components/skill/PublishSkillDialog";
@@ -49,7 +48,6 @@ export default function CanvasDetailPage({
               <CollapsedHeader />
               <ToolboxHost />
               <PublishSkillHost />
-              <NodeInspector />
               <BottomDock />
               <AgentPanel />
               {viewMode === "storyboard" && <StoryboardView />}

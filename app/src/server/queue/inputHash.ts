@@ -13,6 +13,10 @@ export interface CacheableInput {
   params?: Record<string, unknown>;
   /** 上游摘要（只取稳定字段，避免随机 id 影响命中） */
   upstreams?: Array<{ kind: string; summary: string }>;
+  /** `@引用`（type+id 即可定位内容） */
+  refs?: Array<{ type: string; id: string }>;
+  /** 参考图地址列表 */
+  referenceImages?: string[];
 }
 
 /** 稳定序列化：key 排序，去掉序列化里字段顺序的影响 */
@@ -33,6 +37,8 @@ export function hashInput(input: CacheableInput): string {
     prompt: input.prompt,
     params: input.params ?? {},
     upstreams: (input.upstreams ?? []).map((u) => ({ kind: u.kind, summary: u.summary })),
+    refs: (input.refs ?? []).map((r) => ({ type: r.type, id: r.id })),
+    referenceImages: input.referenceImages ?? [],
   });
   return createHash("sha256").update(canonical).digest("hex");
 }

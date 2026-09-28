@@ -83,10 +83,119 @@ export async function resolveUpstreams(workflowId: string, nodeId: string) {
       kind: ud.kind,
       summary: ud.output.text?.slice(0, 200) ?? ud.output.urls?.[0] ?? "",
       ...(ud.output.urls?.length ? { urls: ud.output.urls } : {}),
+      // 动作契约（text/script 上游产出）→ AutoLink 消费
+      ...(ud.output.action ? { action: ud.output.action } : {}),
     });
   }
 
   return { upstreams, pending };
+}
+
+/* ------------------------------------------------------------------ */
+/* `@引用` 解析（参考 / 标记 / 角色库）：把节点 refs 变成生成输入          */
+/* ------------------------------------------------------------------ */
+
+export interface ResolvedRefs {
+  /** 文本类参考（节点产物摘要 / 角色设定），并入 upstreams 进上下文 */
+  upstreams: GenUpstream[];
+  /** 图片类参考（被引用节点的图片产物 / 标记所在图 / 角色参考图） */
+  referenceImages: string[];
+  /** `model:` 引用覆盖节点模型选择 */
+  modelOverride?: string;
+}
+
+/**
+ * 把节点上的 refs 解析成生成可用的输入：
+ * - node / asset 引用 → 该节点已就绪产物（文本进上下文，图片进参考图）
+ * - mark 引用 → 标记所在图进参考图（标记名已在提示词文本里）
+ * - character 引用 → 角色设定进上下文 + 参考图
+ * - model 引用 → 覆盖模型
+ * 安全：节点/角色都校验归属当前用户，越权引用静默丢弃。
+ */
+export async function resolveRefs(
+  nodeData: FlowNodeData,
+  userId: string,
+): Promise<ResolvedRefs> {
+  const refs = nodeData.refs ?? [];
+  const out: ResolvedRefs = { upstreams: [], referenceImages: [] };
+  if (!refs.length) return out;
+
+  const pushImage = (url?: string | null) => {
+    if (url && !out.referenceImages.includes(url)) out.referenceImages.push(url);
+  };
+
+  // 节点 / 素材类引用：批量取节点行（asset: 前缀是「上游节点的产物」写法）
+  const nodeRefIds = refs
+    .filter((r) => r.type === "node" || r.type === "asset")
+    .map((r) => r.id.replace(/^asset:/, ""));
+  if (nodeRefIds.length) {
+    const rows = await prisma.canvasNode.findMany({
+      where: { id: { in: nodeRefIds } },
+      select: { id: true, workflowId: true, data: true },
+    });
+    // 只能引用本人工作流里的节点
+    const wfIds = [...new Set(rows.map((r) => r.workflowId))];
+    const ownedWfs = wfIds.length
+      ? await prisma.workflow.findMany({
+          where: { id: { in: wfIds }, userId },
+          select: { id: true },
+        })
+      : [];
+    const ownedSet = new Set(ownedWfs.map((w) => w.id));
+
+    for (const row of rows) {
+      if (!ownedSet.has(row.workflowId)) continue;
+      let ud: FlowNodeData;
+      try {
+        ud = JSON.parse(row.data) as FlowNodeData;
+      } catch {
+        continue;
+      }
+      if (ud.status !== "succeeded" || !ud.output) continue;
+      const title = `@${ud.title}${ud.index ? ` ${ud.index}` : ""}`;
+      const images = (ud.output.urls ?? []).filter(Boolean);
+      images.forEach(pushImage);
+      out.upstreams.push({
+        nodeId: row.id,
+        title,
+        kind: ud.kind,
+        summary: ud.output.text?.slice(0, 200) ?? images[0] ?? "",
+        ...(images.length ? { urls: images } : {}),
+        ...(ud.output.action ? { action: ud.output.action } : {}),
+      });
+    }
+  }
+
+  // 区域标记：标记图进参考图
+  for (const r of refs) {
+    if (r.type === "mark") pushImage(r.mark?.imageUrl);
+  }
+
+  // 角色库：设定进上下文，参考图进图生图
+  const charIds = refs.filter((r) => r.type === "character").map((r) => r.id);
+  if (charIds.length) {
+    const chars = await prisma.character.findMany({
+      where: { id: { in: charIds }, userId },
+    });
+    for (const c of chars) {
+      out.upstreams.push({
+        nodeId: `character:${c.id}`,
+        title: `@角色·${c.name}`,
+        kind: "text",
+        summary: `角色设定：${c.name}${c.description ? `——${c.description}` : ""}。提示词中出现「@${c.name}」时即指该角色，需保持形象一致。`,
+      });
+      pushImage(c.imageUrl);
+    }
+  }
+
+  // 模型引用：最后一个生效
+  const modelRef = refs.filter((r) => r.type === "model").pop();
+  if (modelRef) {
+    const name = modelRef.id.replace(/^model:/, "").trim();
+    if (name) out.modelOverride = name;
+  }
+
+  return out;
 }
 
 /* ------------------------------------------------------------------ */

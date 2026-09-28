@@ -1,4 +1,4 @@
-import type { NodeKind } from "@/types";
+import type { NodeAction, NodeKind } from "@/types";
 
 /* ------------------------------------------------------------------ */
 /* GenProvider：统一的“生成能力”抽象                                    */
@@ -28,6 +28,8 @@ export interface GenUpstream {
    * 真实厂商做「图生视频」时需要拿到真实图片地址当首帧，光有文字摘要不够。
    */
   urls?: string[];
+  /** 上游产出的动作契约（text/script 上游有值，AutoLink 消费） */
+  action?: NodeAction;
 }
 
 /** 一次生成调用的输入 */
@@ -43,6 +45,11 @@ export interface GenInput {
   params?: Record<string, unknown>;
   /** 直接上游的产物（已就绪） */
   upstreams?: GenUpstream[];
+  /**
+   * `@引用` 解析出的参考图（图生图 / 首帧）：
+   * 来自被引用节点的图片产物、区域标记所在图、角色参考图。
+   */
+  referenceImages?: string[];
 }
 
 /** 生成结果（成功时） */
@@ -54,6 +61,8 @@ export interface GenResult {
   urls?: string[];
   /** 结构化分镜（text/script 产出） */
   shots?: import("@/types").Shot[];
+  /** 动作契约（text/script 产出，对齐 LibTV 的 {action, action_input, supplementary}） */
+  action?: NodeAction;
 }
 
 /** 运行上下文 */

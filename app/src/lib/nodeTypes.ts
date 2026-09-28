@@ -26,7 +26,8 @@ export const NODE_META: Record<NodeKind, NodeMeta> = {
     accent: "#8b5cf6",
     defaults: { model: "Doubao Seed 2.1 Pro" },
     models: ["Doubao Seed 2.1 Pro", "DeepSeek V4 Pro", "GLM 5.2"],
-    suggestions: ["写一段视频脚本", "提取画面提示词", "结构化输出 JSON"],
+    // 对齐 LibTV 实测的文本节点「尝试」建议
+    suggestions: ["自己编写内容", "文生视频", "图片反推提示词", "文字生音乐"],
     outputLabel: "文本",
     placeholder: "写下你想讲的故事、场景或角色设定，@引用素材",
   },

@@ -200,6 +200,33 @@ export function useMention({
   const atIndexRef = React.useRef(0);
   const groups = useMentionGroups(nodeId, data);
 
+  /**
+   * 本地镜像（IME 中文输入修复）：textarea 的 value 绑本地 state 而不是 store。
+   * store 的 value 要经过 WorkflowCanvas → React Flow 内部 store → 节点 props
+   * 才传回来，慢一拍；击键后 React 的 restoreControlledState 会把 DOM 重置回
+   * 旧值，进行中的 IME 组合被打死（表现为“拼音只剩最后一个字母”）。
+   * 本地镜像在击键当帧更新，prop 与 DOM 一致，restoration 就不会动 DOM。
+   */
+  const [local, setLocal] = React.useState(value);
+  /** 最近一次由本组件写出的值：回流回来的同值不覆盖本地（防止击键竞态回退） */
+  const lastWritten = React.useRef(value);
+  React.useEffect(() => {
+    if (value !== lastWritten.current) {
+      lastWritten.current = value;
+      setLocal(value);
+    }
+  }, [value]);
+
+  /** 写入口：本地立即生效 + 同步到 store（store 回流会被 lastWritten 跳过） */
+  const change = React.useCallback(
+    (next: string) => {
+      lastWritten.current = next;
+      setLocal(next);
+      onChange(next);
+    },
+    [onChange],
+  );
+
   /** 光标前是否处于 `@xxx` 语境 */
   const sync = React.useCallback(
     (next: string, caret: number) => {
@@ -217,18 +244,18 @@ export function useMention({
   );
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    onChange(e.target.value);
+    change(e.target.value);
     sync(e.target.value, e.target.selectionStart ?? e.target.value.length);
   };
 
   const pick = React.useCallback(
     (item: MentionItem) => {
       const el = textareaRef.current;
-      const caret = el?.selectionStart ?? value.length;
-      const before = value.slice(0, atIndexRef.current);
-      const after = value.slice(caret);
+      const caret = el?.selectionStart ?? local.length;
+      const before = local.slice(0, atIndexRef.current);
+      const after = local.slice(caret);
       const inserted = `@${item.label} `;
-      onChange(before + inserted + after);
+      change(before + inserted + after);
       onAddRef({ id: item.id, type: item.type, label: item.label });
       setQuery(null);
       // 光标落到插入内容之后
@@ -238,8 +265,47 @@ export function useMention({
         el?.setSelectionRange(pos, pos);
       });
     },
-    [onAddRef, onChange, textareaRef, value],
+    [onAddRef, change, textareaRef, local],
   );
+
+  /** 在光标处插入文本（工具条插入特效/运镜/角色/标记用），并关闭引用浮层 */
+  const insertAtCaret = React.useCallback(
+    (text: string) => {
+      const el = textareaRef.current;
+      const caret = el?.selectionStart ?? local.length;
+      const before = local.slice(0, caret);
+      const after = local.slice(caret);
+      change(before + text + after);
+      setQuery(null);
+      const pos = before.length + text.length;
+      requestAnimationFrame(() => {
+        el?.focus();
+        el?.setSelectionRange(pos, pos);
+      });
+    },
+    [change, textareaRef, local],
+  );
+
+  /** 「+ 参考」按钮：在光标处补一个 `@` 并打开引用浮层（已在 @ 语境则直接打开） */
+  const openMention = React.useCallback(() => {
+    const el = textareaRef.current;
+    const caret = el?.selectionStart ?? local.length;
+    const before = local.slice(0, caret);
+    const after = local.slice(caret);
+    if (/@([^\s@]{0,20})$/.test(before)) {
+      // 已在 @ 语境：只确保浮层打开
+      sync(local, caret);
+      el?.focus();
+      return;
+    }
+    const next = before + "@" + after;
+    change(next);
+    sync(next, before.length + 1);
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(before.length + 1, before.length + 1);
+    });
+  }, [change, sync, textareaRef, local]);
 
   const flat = React.useMemo(
     () =>
@@ -258,6 +324,12 @@ export function useMention({
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // **中文输入法（IME）兼容**：composition 期间的 Enter / 上下箭头是用来确认或选择
+    // 候选词的，绝不能被下面的 mention 逻辑 preventDefault 掉，否则用户
+    // 按 Enter 确认中文时会变成“@了一个东西”，中文根本打不进去。
+    // keyCode 229 = 输入法正在组字（老浏览器/部分 IME 拿不到 isComposing 时的兜底）。
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+
     if (query === null || flat.length === 0) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -275,6 +347,8 @@ export function useMention({
   };
 
   return {
+    /** textarea 的 value 用这个（本地镜像），不要直接用 store 的 value */
+    mentionValue: local,
     mentionOpen: query !== null,
     mentionQuery: query ?? "",
     mentionGroups: groups,
@@ -283,6 +357,8 @@ export function useMention({
     handleChange,
     handleKeyDown,
     pick,
+    insertAtCaret,
+    openMention,
     closeMention: () => setQuery(null),
   };
 }

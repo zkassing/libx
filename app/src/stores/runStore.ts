@@ -14,6 +14,8 @@ export interface RunEventPayload {
   type:
     | "queued"
     | "started"
+    // 快照帧直发 DB 状态 "running"（不是 "started"），漏掉它重连后状态会卡住
+    | "running"
     | "progress"
     | "cached"
     | "succeeded"
@@ -57,6 +59,8 @@ function toStatus(type: RunEventPayload["type"]): RunStatus {
     case "queued":
       return "queued";
     case "started":
+      return "running";
+    case "running":
       return "running";
     case "progress":
       return "running";

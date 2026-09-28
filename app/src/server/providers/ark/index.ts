@@ -1,7 +1,7 @@
 import type { GenContext, GenInput, GenProvider, GenResult } from "../types";
 import type { Shot, ShotFraming } from "@/types";
 import { resolveArkModel } from "./config";
-import { arkChat, arkCreateVideoTask, arkGetVideoTask, arkImage } from "./client";
+import { arkChat, arkCreateVideoTask, arkGetVideoTask, arkImage, toArkImageRef } from "./client";
 import { persistRemoteMedia, persistAllRemote } from "../mediaStore";
 
 /* ------------------------------------------------------------------ */
@@ -94,14 +94,15 @@ function normalizeShots(raw: unknown): Shot[] {
 const SHOT_SYSTEM_PROMPT = `你是资深影视分镜师，为 AI 视频生成提供分镜脚本。
 
 只输出一个 JSON 对象，不要任何解释文字、不要 markdown 代码块，格式严格如下：
-{"text":"整体文案或口播稿；若用户只要分镜可给空串","shots":[{"scene":"画面内容描述","dialogue":"该镜头台词或旁白，无则空串","framing":"远景|全景|中景|近景|特写","camera":"运镜方式，如 缓慢推近 / 固定 / 横移","duration":5}]}
+{"text":"整体文案或口播稿；若用户只要分镜可给空串","action_input":"给下游文生图/文生视频直接使用的完整画面提示词（一段连贯描述，含主体、环境、光线、风格）","style":"整体美术风格，如 电影级写实/赛博朋克/新中式/皮克斯动画","aspect_ratio":"建议画幅比例，从 16:9 / 9:16 / 1:1 / 4:3 / 3:4 中选一个","shots":[{"scene":"画面内容描述","dialogue":"该镜头台词或旁白，无则空串","framing":"远景|全景|中景|近景|特写","camera":"运镜方式，如 缓慢推近 / 固定 / 横移","duration":5}]}
 
 要求：
 1. shots 给 3 到 6 个，按时长与叙事节奏排布；
 2. duration 是整数秒，取值 2 到 10；
 3. scene 必须具体可画：写清主体、动作、环境、光线与氛围，不要写"同上""延续前一镜"这类无法作画的话（它会直接作为文生图提示词）；
 4. dialogue 只放真正会被念出来的台词/旁白，纯画面镜头给空串；
-5. 全程使用简体中文。`;
+5. action_input、style、aspect_ratio 必填，下游节点会机器消费这三个字段；
+6. 全程使用简体中文。`;
 
 export const arkTextProvider: GenProvider = {
   name: "ark-text",
@@ -139,6 +140,13 @@ export const arkTextProvider: GenProvider = {
     }
 
     const body = String(parsed.text ?? "").trim();
+
+    // 动作契约（对齐 LibTV 实测结构）：action_input 优先取模型给的完整提示词，
+    // 缺失时按 整体文案 → 首镜画面 的顺序兜底，保证下游永远有可消费的东西。
+    const actionInput =
+      String(parsed.action_input ?? "").trim() || body || shots[0].scene;
+    const style = String(parsed.style ?? "").trim() || "电影级";
+    const aspectRatio = String(parsed.aspect_ratio ?? "").trim() || "16:9";
     const shotBlock = `\n\n/* --- 分镜（${shots.length} 镜） ---\n${shots
       .map(
         (s) =>
@@ -154,6 +162,11 @@ export const arkTextProvider: GenProvider = {
       kind: input.nodeKind,
       text: `${body || input.title}${digest ? `\n\n/* --- 上游上下文 ---\n${digest}\n*/` : ""}${shotBlock}`,
       shots,
+      action: {
+        action: input.nodeKind === "script" ? "generate_storyboard" : "text_to_image",
+        action_input: actionInput,
+        supplementary: { style, aspect_ratio: aspectRatio },
+      },
     };
   },
 };
@@ -196,6 +209,8 @@ export const arkImageProvider: GenProvider = {
 
       const urls = await arkImage(model, prompt, {
         size: RATIO_SIZE[ratio] ?? RATIO_SIZE["16:9"],
+        // `@引用` 的参考图（被引用节点产物 / 标记图 / 角色参考图）→ 图生图
+        referenceImages: input.referenceImages,
         signal: ctx.signal,
       });
 
@@ -247,14 +262,17 @@ export const arkVideoProvider: GenProvider = {
 
     const content: Array<Record<string, unknown>> = [{ type: "text", text }];
 
-    // 图生视频：把上游已就绪的图片当首帧（文生视频则不加）
-    const upstreamImage = (input.upstreams ?? [])
+    // 图生视频：把上游已就绪的图片当首帧（文生视频则不加）；
+    // 没有连线上游图时，退而取 `@引用` 的第一张参考图
+    const edgeImage = (input.upstreams ?? [])
       .filter((u) => u.kind === "image")
       .flatMap((u) => u.urls ?? [])[0];
+    const upstreamImage = edgeImage ?? input.referenceImages?.[0];
     if (upstreamImage) {
       content.push({
         type: "image_url",
-        image_url: { url: upstreamImage },
+        // 本地产物转 base64 内联，方舟回源不到 localhost
+        image_url: { url: await toArkImageRef(upstreamImage) },
         role: "first_frame",
       });
     }

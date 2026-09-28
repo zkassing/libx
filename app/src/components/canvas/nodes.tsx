@@ -4,6 +4,7 @@ import * as React from "react";
 import {
   Handle,
   Position,
+  useStore,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
@@ -12,6 +13,7 @@ import {
   Boxes,
   Check,
   ChevronDown,
+  Crosshair,
   Download,
   Expand,
   Image as ImageIcon,
@@ -25,9 +27,11 @@ import {
   Plus,
   SlidersHorizontal,
   Sparkles,
+  Square,
   CircleSlash,
   TriangleAlert,
   Type as TypeIcon,
+  UserRound,
   Video as VideoIcon,
   ScrollText,
   Wand2,
@@ -36,7 +40,9 @@ import {
 import { ASPECT_RATIOS, DURATIONS, NODE_META, RESOLUTIONS } from "@/lib/nodeTypes";
 import {
   NODE_LABEL_H,
-  NODE_SIZE,
+  TEXT_CARD_MAX,
+  TEXT_CARD_MIN,
+  aspectCardSize,
   type FlowNodeData,
   type NodeKind,
   type NodeRef,
@@ -49,6 +55,16 @@ import {
   MentionMenu,
   useMention,
 } from "@/components/canvas/MentionMenu";
+import {
+  CharacterPicker,
+  MarkPopover,
+  MarkingDialog,
+  PresetPopover,
+  useMarkSources,
+  type CharacterDto,
+  type MarkSource,
+} from "@/components/canvas/ToolPopovers";
+import { CAMERA_PRESETS, EFFECT_PRESETS } from "@/lib/toolPresets";
 import { OutputPreview } from "@/components/canvas/OutputPreview";
 import { Button } from "@/components/ui/button";
 import {
@@ -89,6 +105,9 @@ type FlowNode = Node<FlowNodeData>;
 const HANDLE_RANGE = 30;
 /** 拖连线时目标卡片的 3D 最大倾角 */
 const TILT_MAX = 9;
+/** 卡片尺寸过渡（切换画幅比例时播放；拖拽调大小期间禁用，否则卡片跟不上鼠标） */
+const SIZE_TRANSITION =
+  "width 260ms cubic-bezier(0.22, 1, 0.36, 1), height 260ms cubic-bezier(0.22, 1, 0.36, 1)";
 
 /* ------------------------------------------------------------------ */
 /* 状态指示                                                            */
@@ -167,15 +186,21 @@ function RefChips({ id, data }: { id: string; data: FlowNodeData }) {
             "flex items-center gap-1 rounded-md border py-0.5 pr-1 pl-1.5 text-[11px]",
             ref.type === "model"
               ? "border-primary/30 bg-primary/10 text-primary-200"
-              : ref.type === "asset"
+              : ref.type === "asset" || ref.type === "mark"
                 ? "border-emerald-400/25 bg-emerald-400/8 text-emerald-200/85"
-                : "border-white/12 bg-white/6 text-white/70",
+                : ref.type === "character"
+                  ? "border-violet-400/30 bg-violet-400/10 text-violet-200/90"
+                  : "border-white/12 bg-white/6 text-white/70",
           )}
         >
           {ref.type === "node" ? (
             <Boxes className="size-3" />
           ) : ref.type === "asset" ? (
             <ImageIcon className="size-3" />
+          ) : ref.type === "mark" ? (
+            <Crosshair className="size-3" />
+          ) : ref.type === "character" ? (
+            <UserRound className="size-3" />
           ) : (
             <Sparkles className="size-3" />
           )}
@@ -327,7 +352,7 @@ function NodeBody({ data }: { data: FlowNodeData }) {
   }
 
   if (output?.text || output?.urls?.length) {
-    return <OutputPreview output={output} />;
+    return <OutputPreview output={output} marks={data.marks} />;
   }
 
   if (kind === "video" || kind === "image" || kind === "audio") {
@@ -443,6 +468,7 @@ function NodeEditorDialog({
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const updateNodeParams = useCanvasStore((s) => s.updateNodeParams);
   const runNode = useCanvasStore((s) => s.runNode);
+  const cancelNode = useCanvasStore((s) => s.cancelNode);
   const { meta, ratios, resolutions, durations } = useParamOptions(data.kind);
   const Icon = NODE_ICONS[data.kind];
   const p = data.params ?? {};
@@ -484,7 +510,7 @@ function NodeEditorDialog({
             <div className="relative rounded-xl border border-white/10 bg-[#191919] p-3">
               <Textarea
                 ref={promptRef}
-                value={data.prompt}
+                value={mention.mentionValue}
                 onChange={mention.handleChange}
                 onKeyDown={mention.handleKeyDown}
                 placeholder={meta.placeholder}
@@ -658,18 +684,17 @@ function NodeEditorDialog({
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
             关闭
           </Button>
-          <Button
-            size="sm"
-            onClick={() => runNode(id)}
-            disabled={data.status === "running"}
-          >
-            {data.status === "running" ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
+          {data.status === "running" || data.status === "queued" ? (
+            <Button size="sm" variant="destructive" onClick={() => cancelNode(id)}>
+              <Square className="size-3.5 fill-current" />
+              停止生成
+            </Button>
+          ) : (
+            <Button size="sm" onClick={() => runNode(id)}>
               <Play className="size-3.5" />
-            )}
-            运行本节点
-          </Button>
+              运行本节点
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -707,6 +732,7 @@ function Composer({
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const updateNodeParams = useCanvasStore((s) => s.updateNodeParams);
   const runNode = useCanvasStore((s) => s.runNode);
+  const cancelNode = useCanvasStore((s) => s.cancelNode);
   const { meta } = useParamOptions(data.kind);
 
   const promptRef = React.useRef<HTMLTextAreaElement>(null);
@@ -730,35 +756,146 @@ function Composer({
   const p = data.params ?? {};
   const credit = data.kind === "video" ? 135 : data.kind === "image" ? 12 : 2;
 
-  const paramLabel = [
-    p.aspectRatio,
-    p.resolution,
-    p.duration ? `${p.duration}s` : undefined,
-    p.count ? `${p.count}个` : undefined,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  /* ---- 工具条（参考 / 标记 / 特效 / 角色库 / 运镜）---- */
+  const [openTool, setOpenTool] = React.useState<string | null>(null);
+  const [markingSource, setMarkingSource] = React.useState<MarkSource | null>(null);
+  const markSources = useMarkSources(id, data);
+  const presetKind =
+    data.kind === "video" ? "video" : data.kind === "image" ? "image" : "text";
+
+  /** 插入一个标记引用（已有标记 / 新建标记都走这里） */
+  const insertMark = React.useCallback(
+    (source: MarkSource, mark: import("@/types").NodeMark) => {
+      mention.insertAtCaret(`@${mark.label} `);
+      addRef({
+        id: mark.id,
+        type: "mark",
+        label: mark.label,
+        mark: { nodeId: source.nodeId, imageUrl: mark.imageUrl, rect: mark.rect },
+      });
+    },
+    [mention, addRef],
+  );
+
+  /** 新建标记保存：写到来源图片节点的 data.marks，并插入提示词 */
+  const handleMarkDone = React.useCallback(
+    (source: MarkSource, mark: import("@/types").NodeMark) => {
+      const srcNode = useCanvasStore
+        .getState()
+        .nodes.find((n) => n.id === source.nodeId);
+      if (srcNode) {
+        const d = srcNode.data as FlowNodeData;
+        updateNodeData(source.nodeId, { marks: [...(d.marks ?? []), mark] });
+      }
+      insertMark(source, mark);
+    },
+    [updateNodeData, insertMark],
+  );
+
+  /** 工具条按钮点击：参考开引用浮层；其余切换各自弹出层 */
+  const handleTool = (tool: string) => {
+    if (tool === "参考") {
+      setOpenTool(null);
+      mention.openMention();
+      return;
+    }
+    setOpenTool((t) => (t === tool ? null : tool));
+  };
+
+  const renderToolPopover = (tool: string) => {
+    if (openTool !== tool) return null;
+    const cls = "absolute top-full left-0 z-[60] mt-1";
+    if (tool === "特效") {
+      return (
+        <PresetPopover
+          groups={EFFECT_PRESETS[presetKind]}
+          onPick={(item) => {
+            mention.insertAtCaret(`${item}，`);
+            setOpenTool(null);
+          }}
+          className={cls}
+        />
+      );
+    }
+    if (tool === "运镜") {
+      return (
+        <PresetPopover
+          groups={CAMERA_PRESETS}
+          onPick={(item) => {
+            mention.insertAtCaret(`${item}，`);
+            setOpenTool(null);
+          }}
+          className={cls}
+        />
+      );
+    }
+    if (tool === "角色库") {
+      return (
+        <CharacterPicker
+          onPick={(c: CharacterDto) => {
+            mention.insertAtCaret(`@${c.name} `);
+            addRef({ id: c.id, type: "character", label: c.name });
+            setOpenTool(null);
+          }}
+          className={cls}
+        />
+      );
+    }
+    if (tool === "标记") {
+      return (
+        <MarkPopover
+          sources={markSources}
+          onPickMark={(s, m) => {
+            insertMark(s, m);
+            setOpenTool(null);
+          }}
+          onCreateMark={(s) => {
+            setMarkingSource(s);
+            setOpenTool(null);
+          }}
+          className={cls}
+        />
+      );
+    }
+    return null;
+  };
+
+  // 该节点种类下真正适用的参数（对齐 LibTV 字段清单 / PRD §13.2）。
+  // 文本只有模型；图片=模型·模式·比例·数量；视频=模型·模式·比例·分辨率·时长·数量；
+  // 音频=模型·模式·时长·数量；脚本=模型·模式。
+  const showRatio = data.kind === "image" || data.kind === "video";
+  const showResolution = data.kind === "video";
+  const showDuration = data.kind === "video" || data.kind === "audio";
+  const showCount = data.kind === "image" || data.kind === "video" || data.kind === "audio";
 
   return (
-    <div className="nodrag nowheel absolute top-[calc(100%+8px)] left-0 z-50 w-full rounded-xl border border-white/10 bg-[#262626]/95 shadow-2xl backdrop-blur-xl">
+    <div
+      style={{ width: "min(520px, calc(100vw - 16px))" }}
+      className="nodrag nowheel absolute top-[calc(100%+8px)] left-1/2 z-50 -translate-x-1/2 rounded-xl border border-white/10 bg-[#262626]/95 shadow-2xl backdrop-blur-xl"
+    >
       {/* 上游自动参考 */}
       <UpstreamChips id={id} />
-      {/* 工具条 */}
-      <div className="flex items-center gap-0.5 border-b border-white/6 px-1.5 py-1">
+      {/* 工具条（点击外部区域关闭弹出层） */}
+      {openTool && (
+        <div className="fixed inset-0 z-40" onClick={() => setOpenTool(null)} />
+      )}
+      <div className="relative flex items-center gap-0.5 border-b border-white/6 px-1.5 py-1">
         {meta.tools?.map((t) => (
-          <Tooltip key={t}>
-            <TooltipTrigger asChild>
-              <button
-                aria-disabled="true"
-                className="flex h-6 cursor-not-allowed items-center gap-1 rounded-md px-2 text-[11.5px] text-white/22"
-              >
-                <Plus className="size-3" />
-                {t}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t} · M2 接入</TooltipContent>
-          </Tooltip>
+          <button
+            key={t}
+            onClick={() => handleTool(t)}
+            className={cn(
+              "flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] transition",
+              openTool === t
+                ? "bg-white/12 text-white"
+                : "text-white/55 hover:bg-white/8 hover:text-white/85",
+            )}
+          >
+            <Plus className="size-3" />
+            {t}
+          </button>
         ))}
+        {meta.tools?.map(renderToolPopover)}
         <button
           onClick={onExpand}
           title="放大编辑"
@@ -772,7 +909,7 @@ function Composer({
       <div className="relative px-3 pt-2.5">
         <Textarea
           ref={promptRef}
-          value={data.prompt}
+          value={mention.mentionValue}
           onChange={mention.handleChange}
           onKeyDown={mention.handleKeyDown}
           placeholder={meta.placeholder}
@@ -805,20 +942,39 @@ function Composer({
             onChange={(v) => updateNodeParams(id, { mode: v })}
           />
         )}
-        <ChipSelect
-          label={paramLabel || "参数"}
-          options={[
-            ...ASPECT_RATIOS,
-            ...RESOLUTIONS,
-            ...DURATIONS.map((d) => `${d}s`),
-          ]}
-          onChange={(v) => {
-            if (ASPECT_RATIOS.includes(v)) return updateNodeParams(id, { aspectRatio: v });
-            if (RESOLUTIONS.includes(v)) return updateNodeParams(id, { resolution: v });
-            const d = Number(v.replace("s", ""));
-            if (!Number.isNaN(d)) updateNodeParams(id, { duration: d });
-          }}
-        />
+        {/* 参数各自独立成 chip：比例就是比例、分辨率就是分辨率、时长就是时长，
+            不合并成“16:9 · 1个”这种描述 */}
+        {showRatio && (
+          <ChipSelect
+            value={p.aspectRatio}
+            options={ASPECT_RATIOS}
+            onChange={(v) => updateNodeParams(id, { aspectRatio: v })}
+          />
+        )}
+        {showResolution && (
+          <ChipSelect
+            value={p.resolution}
+            options={RESOLUTIONS}
+            onChange={(v) => updateNodeParams(id, { resolution: v })}
+          />
+        )}
+        {showDuration && (
+          <ChipSelect
+            label={p.duration ? `${p.duration}s` : "时长"}
+            options={DURATIONS.map((d) => `${d}s`)}
+            onChange={(v) => {
+              const d = Number(v.replace("s", ""));
+              if (!Number.isNaN(d)) updateNodeParams(id, { duration: d });
+            }}
+          />
+        )}
+        {showCount && (
+          <ChipSelect
+            label={`${p.count ?? 1}个`}
+            options={[1, 2, 4]}
+            onChange={(v) => updateNodeParams(id, { count: Number(v) })}
+          />
+        )}
 
         <div className="ml-auto flex items-center gap-0.5">
           <Tooltip>
@@ -877,20 +1033,38 @@ function Composer({
             <Wand2 className="size-3" />
             {credit}
           </span>
-          <Button
-            size="icon-sm"
-            className="rounded-full"
-            onClick={() => runNode(id)}
-            disabled={data.status === "running"}
-          >
-            {data.status === "running" ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
+          {/* 生成中（含排队）发送按钮变为停止按钮（对齐 LibTV）；
+              取消走 cancelNode → POST /api/runs/:id/cancel，终态由 SSE 回填 */}
+          {data.status === "running" || data.status === "queued" ? (
+            <Button
+              size="icon-sm"
+              className="rounded-full bg-destructive text-white hover:bg-destructive/85"
+              title="停止生成"
+              onClick={() => cancelNode(id)}
+            >
+              <Square className="size-3 fill-current" />
+            </Button>
+          ) : (
+            <Button
+              size="icon-sm"
+              className="rounded-full"
+              onClick={() => runNode(id)}
+            >
               <ArrowUp className="size-3.5" />
-            )}
-          </Button>
+            </Button>
+          )}
         </div>
       </div>
+
+      {/* 框选标记 Dialog（标记保存在来源图片节点上） */}
+      <MarkingDialog
+        source={markingSource}
+        open={markingSource !== null}
+        onOpenChange={(v) => {
+          if (!v) setMarkingSource(null);
+        }}
+        onDone={handleMarkDone}
+      />
     </div>
   );
 }
@@ -899,14 +1073,106 @@ function Composer({
 /* 节点外壳                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 卡片右下角的尺寸手柄（文本节点）。
+ * 拖动即改卡片宽 / 高：位移除以当前缩放换算回画布坐标，
+ * 尺寸通过 canvasStore.resizeNode 持久化（style / measured 同步更新，
+ * 连线锚点、打组包围盒都会跟随）。
+ */
+function CardResizeHandle({
+  id,
+  cardW,
+  cardH,
+  onResizeStart,
+  onResizeEnd,
+}: {
+  id: string;
+  cardW: number;
+  cardH: number;
+  /** 拖拽起止通知：拖拽期间父组件要禁用尺寸过渡动画，避免卡片滞后于鼠标 */
+  onResizeStart?: () => void;
+  onResizeEnd?: () => void;
+}) {
+  const resizeNode = useCanvasStore((s) => s.resizeNode);
+  const zoom = useStore((s) => s.transform[2]);
+  const start = React.useRef<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null>(null);
+
+  return (
+    <div
+      title="拖拽调整卡片大小"
+      className="nodrag nowheel absolute right-0 bottom-0 z-20 flex size-6 cursor-nwse-resize items-end justify-end p-1.5 text-white/20 opacity-0 transition group-hover/card:opacity-100 hover:text-white/70"
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        start.current = { x: e.clientX, y: e.clientY, w: cardW, h: cardH };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        onResizeStart?.();
+      }}
+      onPointerMove={(e) => {
+        const st = start.current;
+        if (!st) return;
+        const w = Math.round(
+          Math.min(
+            TEXT_CARD_MAX.w,
+            Math.max(TEXT_CARD_MIN.w, st.w + (e.clientX - st.x) / zoom),
+          ),
+        );
+        const h = Math.round(
+          Math.min(
+            TEXT_CARD_MAX.h,
+            Math.max(TEXT_CARD_MIN.h, st.h + (e.clientY - st.y) / zoom),
+          ),
+        );
+        resizeNode(id, { w, h });
+      }}
+      onPointerUp={(e) => {
+        start.current = null;
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+        onResizeEnd?.();
+      }}
+      onPointerCancel={() => {
+        start.current = null;
+        onResizeEnd?.();
+      }}
+    >
+      {/* 角落斜纹把手 */}
+      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+        <path
+          d="M9 1.5 L1.5 9 M9 5.5 L5.5 9"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+        />
+      </svg>
+    </div>
+  );
+}
+
 function BaseNode({ id, data, selected }: NodeProps<FlowNode>) {
   const Icon = NODE_ICONS[data.kind];
-  const { w, h } = NODE_SIZE[data.kind];
+  // 图片/视频按节点当前画幅比例算卡片尺寸（切比例 → 卡片跟着变）；
+  // 返回值是**卡片尺寸**，总高还要加标签行与间距。其他种类为固定卡片尺寸。
+  // 文本节点支持拖右下角自定义卡片尺寸（data.size 持久化）。
+  const base = aspectCardSize(data.kind, data.params?.aspectRatio);
+  const custom = data.kind === "text" ? data.size : undefined;
+  const cardW = custom?.w ?? base.w;
+  const cardH = custom?.h ?? base.h;
+  const w = cardW;
+  const h = cardH + NODE_LABEL_H + 6;
   const connectingFrom = useCanvasStore((s) => s.connectingFrom);
   const [leftOff, setLeftOff] = React.useState({ x: 0, y: 0 });
   const [rightOff, setRightOff] = React.useState({ x: 0, y: 0 });
   const [tilt, setTilt] = React.useState({ x: 0, y: 0 });
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  /** 正在拖拽右下角调大小（此期间禁用尺寸过渡，让卡片贴着鼠标走） */
+  const [resizing, setResizing] = React.useState(false);
   const cardRef = React.useRef<HTMLDivElement>(null);
 
   const isConnectTarget = !!connectingFrom && connectingFrom !== id;
@@ -984,7 +1250,12 @@ function BaseNode({ id, data, selected }: NodeProps<FlowNode>) {
 
   return (
     <div
-      style={{ width: w, height: h }}
+      style={{
+        width: w,
+        height: h,
+        // 切比例 / 调大小后的尺寸过渡；首帧不会触发（transition 不动画初始值）
+        transition: resizing ? "none" : SIZE_TRANSITION,
+      }}
       className="relative flex flex-col"
       onPointerMove={onPointerMove}
       onPointerLeave={onPointerLeave}
@@ -992,8 +1263,11 @@ function BaseNode({ id, data, selected }: NodeProps<FlowNode>) {
       {/* 扩大的感应区：鼠标移出卡片一点（30px 半圆弧内）仍能驱动端口跟随 */}
       <div aria-hidden className="absolute -inset-x-9 -inset-y-2" />
 
-      {/* 节点标签 */}
-      <div className="flex shrink-0 items-center gap-1.5 text-[12px] text-white/45">
+      {/* 节点标签：高度锁 NODE_LABEL_H，避免图标撑开后卡片高度被挤掉 */}
+      <div
+        style={{ height: NODE_LABEL_H }}
+        className="flex shrink-0 items-center gap-1.5 text-[12px] text-white/45"
+      >
         <Icon className="size-3" strokeWidth={1.8} />
         <span className="truncate">
           {data.title}
@@ -1006,14 +1280,22 @@ function BaseNode({ id, data, selected }: NodeProps<FlowNode>) {
       <div
         ref={cardRef}
         className={cn(
-          "relative mt-1.5 flex-1 rounded-xl border bg-[#262626]",
+          "group/card relative mt-1.5 flex-1 rounded-xl border bg-[#262626]",
           isConnectTarget && tilt.x !== 0
             ? "border-primary/50 shadow-[0_0_0_1px_rgba(22,119,255,0.25)]"
             : selected
               ? "border-white/25 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_18px_40px_-12px_rgba(0,0,0,0.9)]"
               : "border-white/8 hover:border-white/16",
         )}
-        style={{ marginTop: 6, height: h - NODE_LABEL_H - 6, ...tiltStyle }}
+        style={{
+          marginTop: 6,
+          height: cardH,
+          ...tiltStyle,
+          // 尺寸过渡与 3D 倾斜过渡合并（tiltStyle.transition 只管 transform）
+          transition: resizing
+            ? tiltStyle.transition
+            : `${SIZE_TRANSITION}, ${tiltStyle.transition}`,
+        }}
       >
         <div className="h-full w-full overflow-hidden rounded-[11px]">
           <NodeBody data={data} />
@@ -1028,6 +1310,15 @@ function BaseNode({ id, data, selected }: NodeProps<FlowNode>) {
           position={Position.Right}
           style={rightStyle}
         />
+        {data.kind === "text" && (
+          <CardResizeHandle
+            id={id}
+            cardW={cardW}
+            cardH={cardH}
+            onResizeStart={() => setResizing(true)}
+            onResizeEnd={() => setResizing(false)}
+          />
+        )}
       </div>
 
       {selected && (

@@ -19,7 +19,12 @@ import { autoLayoutNodes } from "@/lib/layout";
 import { useCanvasPrefs } from "@/stores/canvasPrefs";
 import { useRunStore } from "@/stores/runStore";
 import { subscribeRun, closeAllRunStreams } from "@/lib/runStream";
-import { NODE_SIZE, type FlowNodeData, type NodeKind } from "@/types";
+import {
+  NODE_SIZE,
+  flowNodeSize,
+  type FlowNodeData,
+  type NodeKind,
+} from "@/types";
 
 /** 画布持久化：合并高频写入，拖拽时不再每帧写盘 */
 const canvasPersistence = createDebouncedLocalStorage(400);
@@ -46,6 +51,7 @@ export const HISTORY_LABEL_TEXT: Record<string, string> = {
   "delete-edge": "删除连线",
   connect: "连接节点",
   move: "移动节点",
+  resize: "调整大小",
   "edit-node": "编辑内容",
   params: "修改参数",
   group: "打组",
@@ -72,6 +78,8 @@ const CLOUD_SAVE_DELAY = 1200;
 let cloudSaveTimer: ReturnType<typeof setTimeout> | null = null;
 /** 页面隐藏 / 卸载前可 await 的在途保存 */
 let inFlightSave: Promise<void> | null = null;
+/** 有本地编辑尚未成功写到云端（运行前据此决定是否先落库，失败保持 true 以便重试） */
+let cloudSaveDirty = false;
 
 function scheduleCloudSave(delay = CLOUD_SAVE_DELAY) {
   if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
@@ -85,11 +93,13 @@ function scheduleCloudSave(delay = CLOUD_SAVE_DELAY) {
   }, delay);
 }
 
-/** 立刻取消待写并把在途保存跑完（pagehide / beforeunload 用） */
+/** 立刻取消待写并把在途保存跑完（pagehide / beforeunload / 节点运行前用） */
 async function flushPendingCloudSave() {
   if (cloudSaveTimer) {
     clearTimeout(cloudSaveTimer);
     cloudSaveTimer = null;
+  }
+  if (cloudSaveDirty) {
     await useCanvasStore.getState().saveToCloud();
   }
   if (inFlightSave) await inFlightSave;
@@ -144,6 +154,8 @@ export interface CanvasState {
   updateNodeData: (id: string, patch: Partial<FlowNodeData>) => void;
   removeEdges: (edgeIds: string[]) => void;
   updateNodeParams: (id: string, patch: Record<string, unknown>) => void;
+  /** 拖拽右下角调整卡片尺寸（目前仅文本节点暴露手柄） */
+  resizeNode: (id: string, size: { w: number; h: number }) => void;
   removeNode: (id: string) => void;
   duplicateNode: (id: string) => void;
   setSelected: (id: string | null) => void;
@@ -153,6 +165,8 @@ export interface CanvasState {
   groupSelected: () => string | null;
   ungroupSelected: () => void;
   runNode: (id: string) => Promise<void>;
+  /** 取消某节点最近一次排队/执行中的运行（发送按钮的停止态） */
+  cancelNode: (id: string) => Promise<void>;
   runAll: () => Promise<void>;
   /** 一键整理：按拓扑分层重排节点位置 */
   autoLayout: () => void;
@@ -272,13 +286,15 @@ export const useCanvasStore = create<CanvasState>()(
         get().pushHistory("add-node");
         const index =
           get().nodes.filter((n) => n.data?.kind === kind).length + 1;
+        // 尺寸按真实渲染尺寸给（图片/视频随画幅比例），
+        // 直接给 measured，避免 React Flow 因未测量而不渲染连接线
+        const dims = flowNodeSize(kind, meta.defaults.aspectRatio);
         const node: Node<FlowNodeData> = {
           id,
           type: kind,
           position,
           selected: true,
-          // 尺寸是我们写死的，直接给 measured，避免 React Flow 因未测量而不渲染连接线
-          measured: { width: NODE_SIZE[kind].w, height: NODE_SIZE[kind].h },
+          measured: { width: dims.w, height: dims.h },
           data: {
             kind,
             title: `${meta.label}节点`,
@@ -289,8 +305,8 @@ export const useCanvasStore = create<CanvasState>()(
             progress: 0,
           },
           style: {
-            width: NODE_SIZE[kind].w,
-            height: NODE_SIZE[kind].h,
+            width: dims.w,
+            height: dims.h,
           },
         };
         set((s) => ({
@@ -308,17 +324,61 @@ export const useCanvasStore = create<CanvasState>()(
             n.id === id ? { ...n, data: { ...n.data, ...patch } } : n,
           ),
         }));
+        // 数据级改动不改变节点数量 / id，底部的签名订阅探测不到，这里显式请求保存。
+        // （漏掉它的后果：提示词只存在本地，运行时服务端从 DB 读到旧/空 prompt）
+        get().requestCloudSave();
       },
 
       updateNodeParams: (id, patch) => {
         get().pushHistory("params", 800);
         set((s) => ({
+          nodes: s.nodes.map((n) => {
+            if (n.id !== id) return n;
+            const params = { ...n.data.params, ...patch };
+            // 图片/视频切画幅比例 → 卡片尺寸跟着变，style/measured 必须同步，
+            // 否则连线锚点与包围盒还按旧尺寸算
+            const resized =
+              (n.data.kind === "image" || n.data.kind === "video") &&
+              patch.aspectRatio
+                ? flowNodeSize(n.data.kind, params.aspectRatio)
+                : null;
+            return {
+              ...n,
+              ...(resized
+                ? {
+                    style: { ...n.style, width: resized.w, height: resized.h },
+                    measured: { width: resized.w, height: resized.h },
+                  }
+                : {}),
+              data: { ...n.data, params },
+            };
+          }),
+        }));
+        // 同 updateNodeData：参数是数据级改动，签名订阅探测不到，显式请求保存
+        get().requestCloudSave();
+      },
+
+      resizeNode: (id, size) => {
+        // 一次拖拽合并成一个还原点
+        get().pushHistory("resize", 700);
+        const dims = flowNodeSize("text", undefined, size);
+        const totalW = dims.w;
+        const totalH = dims.h;
+        set((s) => ({
           nodes: s.nodes.map((n) =>
             n.id === id
-              ? { ...n, data: { ...n.data, params: { ...n.data.params, ...patch } } }
+              ? {
+                  ...n,
+                  // 同步 style / measured：React Flow 以此算连线锚点与打组包围盒
+                  style: { ...n.style, width: totalW, height: totalH },
+                  measured: { width: totalW, height: totalH },
+                  data: { ...n.data, size },
+                }
               : n,
           ),
         }));
+        // 数据级改动不改变节点数量 / id，底部的签名订阅探测不到，这里显式请求保存
+        get().requestCloudSave();
       },
 
       removeNode: (id) => {
@@ -337,6 +397,12 @@ export const useCanvasStore = create<CanvasState>()(
         if (!src) return;
         const nid = uid(src.data.kind);
         get().pushHistory("duplicate");
+        // 按源节点的画幅比例 / 自定义尺寸重算（图片/视频的 NODE_SIZE 与渲染尺寸不同）
+        const dims = flowNodeSize(
+          src.data.kind,
+          src.data.params?.aspectRatio,
+          src.data.kind === "text" ? src.data.size : undefined,
+        );
         set((s) => ({
           nodes: [
             ...s.nodes.map((n) => ({ ...n, selected: false })),
@@ -346,10 +412,8 @@ export const useCanvasStore = create<CanvasState>()(
               selected: true,
               parentId: undefined,
               zIndex: undefined,
-              measured: {
-                width: NODE_SIZE[src.data.kind]?.w ?? 360,
-                height: NODE_SIZE[src.data.kind]?.h ?? 240,
-              },
+              measured: { width: dims.w, height: dims.h },
+              style: { ...src.style, width: dims.w, height: dims.h },
               position: { x: src.position.x + 48, y: src.position.y + 48 },
               data: {
                 ...src.data,
@@ -377,14 +441,19 @@ export const useCanvasStore = create<CanvasState>()(
         const pad = 32;
         const minX = Math.min(...children.map((n) => n.position.x));
         const minY = Math.min(...children.map((n) => n.position.y));
+        // 包围盒用实测尺寸（图片/视频、调过大小的文本节点与 NODE_SIZE 不一致）
         const maxX = Math.max(
           ...children.map(
-            (n) => n.position.x + (NODE_SIZE[n.data.kind]?.w ?? 360),
+            (n) =>
+              n.position.x +
+              (n.measured?.width ?? NODE_SIZE[n.data.kind]?.w ?? 360),
           ),
         );
         const maxY = Math.max(
           ...children.map(
-            (n) => n.position.y + (NODE_SIZE[n.data.kind]?.h ?? 240),
+            (n) =>
+              n.position.y +
+              (n.measured?.height ?? NODE_SIZE[n.data.kind]?.h ?? 240),
           ),
         );
 
@@ -464,6 +533,10 @@ export const useCanvasStore = create<CanvasState>()(
         const exists = get().nodes.some((n) => n.id === id);
         if (!exists) return;
 
+        // 关键：先把在途的编辑（提示词/参数）落库再入队。
+        // 服务端是从 DB 读节点数据的，不 flush 就会拿旧 prompt 去生成。
+        await flushPendingCloudSave();
+
         // 生成过程中的 status/progress/output 不进历史栈（撤销不应回退产物）
         get().beginHistoryPause();
         try {
@@ -487,6 +560,21 @@ export const useCanvasStore = create<CanvasState>()(
         } finally {
           // 历史暂停稍后由“终态到达”解除；这里不能立即 end，否则进度会进历史。
           // 终态同步 effect 中统一 endHistoryPause。
+        }
+      },
+
+      cancelNode: async (id) => {
+        // runId 由 SSE 订阅时记入 runStore；没有说明这个节点最近没在跑
+        const runId = useRunStore.getState().nodeStatus[id]?.runId;
+        if (!runId) return;
+        try {
+          const res = await fetch(`/api/runs/${runId}/cancel`, { method: "POST" });
+          if (!res.ok && res.status !== 409) {
+            set({ connectionError: "取消失败，请重试" });
+          }
+          // 成功/409（已结束）都不动本地状态：终态由 SSE canceled/快照统一回填
+        } catch {
+          set({ connectionError: "取消失败，请重试" });
         }
       },
 
@@ -696,16 +784,35 @@ export const useCanvasStore = create<CanvasState>()(
             edges: Edge[];
           };
           // 云端为主：直接用云端图替换。重置运行态与历史栈。
+          // style/measured 统一按真实渲染尺寸重写（老数据里图片/视频是
+          // NODE_SIZE 写死值，连线锚点会偏），group 保持原样。
           set({
-            nodes: data.nodes.map((n) => ({
-              ...n,
-              selected: false,
-              data: {
-                ...n.data,
-                status: n.data.status === "succeeded" ? "succeeded" : "idle",
-                progress: n.data.status === "succeeded" ? 100 : 0,
-              },
-            })),
+            nodes: data.nodes.map((n) => {
+              const kind = n.data?.kind as NodeKind;
+              const dims =
+                n.type !== "group" && NODE_SIZE[kind]
+                  ? flowNodeSize(
+                      kind,
+                      n.data?.params?.aspectRatio,
+                      kind === "text" ? n.data?.size : undefined,
+                    )
+                  : null;
+              return {
+                ...n,
+                selected: false,
+                ...(dims
+                  ? {
+                      measured: { width: dims.w, height: dims.h },
+                      style: { ...n.style, width: dims.w, height: dims.h },
+                    }
+                  : {}),
+                data: {
+                  ...n.data,
+                  status: n.data.status === "succeeded" ? "succeeded" : "idle",
+                  progress: n.data.status === "succeeded" ? 100 : 0,
+                },
+              };
+            }),
             edges: data.edges,
             past: [],
             future: [],
@@ -736,6 +843,7 @@ export const useCanvasStore = create<CanvasState>()(
           });
           if (!res.ok) throw new Error(`保存失败 (${res.status})`);
           const data = (await res.json()) as { savedAt: string };
+          cloudSaveDirty = false;
           set({ cloudStatus: "saved", savedAt: data.savedAt });
         } catch (e) {
           set({
@@ -746,6 +854,7 @@ export const useCanvasStore = create<CanvasState>()(
       },
 
       requestCloudSave: () => {
+        cloudSaveDirty = true;
         scheduleCloudSave();
       },
 
@@ -757,25 +866,30 @@ export const useCanvasStore = create<CanvasState>()(
       partialize: (s) => ({ nodes: s.nodes, edges: s.edges }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
-        state.nodes = state.nodes.map((n) => ({
-          ...n,
-          selected: false,
-          // 卡片尺寸是写死的常量，刷新时统一到最新值（改了 NODE_SIZE 后老数据也能跟上）
-          ...(n.type === "group" || !NODE_SIZE[n.data?.kind as NodeKind]
-            ? {}
-            : {
-                measured: {
-                  width: NODE_SIZE[n.data.kind as NodeKind].w,
-                  height: NODE_SIZE[n.data.kind as NodeKind].h,
-                },
-                style: {
-                  ...n.style,
-                  width: NODE_SIZE[n.data.kind as NodeKind].w,
-                  height: NODE_SIZE[n.data.kind as NodeKind].h,
-                },
-              }),
-          data: { ...n.data, status: "idle", progress: 0 },
-        }));
+        state.nodes = state.nodes.map((n) => {
+          const kind = n.data?.kind as NodeKind;
+          if (n.type === "group" || !NODE_SIZE[kind]) {
+            return {
+              ...n,
+              selected: false,
+              data: { ...n.data, status: "idle", progress: 0 },
+            };
+          }
+          // style/measured 统一按真实渲染尺寸重写：图片/视频随画幅比例，
+          // 文本节点可能有用户自定义尺寸（连线锚点据此计算）
+          const dims = flowNodeSize(
+            kind,
+            n.data?.params?.aspectRatio,
+            kind === "text" ? n.data?.size : undefined,
+          );
+          return {
+            ...n,
+            selected: false,
+            measured: { width: dims.w, height: dims.h },
+            style: { ...n.style, width: dims.w, height: dims.h },
+            data: { ...n.data, status: "idle", progress: 0 },
+          };
+        });
         // 统一成新的实线 + 流光边
         state.edges = state.edges.map((e) => ({
           ...e,

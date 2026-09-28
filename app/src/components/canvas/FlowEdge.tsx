@@ -10,6 +10,14 @@ import {
 } from "@xyflow/react";
 import { X } from "lucide-react";
 import { useCanvasStore } from "@/stores/canvasStore";
+import { NODE_LABEL_H } from "@/types";
+
+/**
+ * 卡片在节点内的垂直偏移：节点 = 标签行(NODE_LABEL_H) + 6px 间距 + 卡片。
+ * 端口「+」位于**卡片**垂直中心，连线锚点必须对齐卡片中心，
+ * 而不是整个节点（含标签行）的中心，否则端点会偏高 16px。
+ */
+const LABEL_OFFSET = NODE_LABEL_H + 6;
 
 /** 水滴型光斑：右侧圆头 + 左侧尖尾（配合 rotate="auto" 朝向运动方向） */
 const DROP = "M 0,-2.8 A 2.8,2.8 0 1 1 0,2.8 L -10,0 Z";
@@ -46,12 +54,16 @@ export function FlowEdge({ id, source, target, selected }: EdgeProps) {
 
   const toRight = tp.x + tw / 2 >= sp.x + sw / 2;
 
+  // group 节点没有标签行（实际上也不允许连线，这里只是防御）
+  const sOff = sNode.type === "group" ? 0 : LABEL_OFFSET;
+  const tOff = tNode.type === "group" ? 0 : LABEL_OFFSET;
+
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX: toRight ? sp.x + sw : sp.x,
-    sourceY: sp.y + sh / 2,
+    sourceY: sp.y + sOff + (sh - sOff) / 2,
     sourcePosition: toRight ? Position.Right : Position.Left,
     targetX: toRight ? tp.x : tp.x + tw,
-    targetY: tp.y + th / 2,
+    targetY: tp.y + tOff + (th - tOff) / 2,
     targetPosition: toRight ? Position.Left : Position.Right,
     curvature: 0.35,
   });
