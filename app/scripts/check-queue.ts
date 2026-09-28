@@ -4,6 +4,10 @@
  * 关键点：每个任务都用「轮询等待终态」，不用拍脑袋的固定延时。
  * 运行：pnpm tsx scripts/check-queue.ts
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 import { PrismaClient } from "../src/generated/prisma/client";
 import { runQueue } from "../src/server/queue/runQueue";
 import { runEventBus } from "../src/server/queue/eventBus";
@@ -51,8 +55,14 @@ async function main() {
       data: { id, workflowId: wf.id, type: kind, x: 0, y: 0, data: nodeData(kind), index: 0 },
     });
   };
-  await makeNode("q_text", "text");
-  await makeNode("q_video", "video");
+  // CanvasNode.id / CanvasEdge.id 是全局主键（非复合），所以必须每次运行都用
+  // 唯一 id —— 否则上一次没跑完的残留会让后续每次运行都撞 P2002 而永远失败。
+  const S = Date.now().toString(36);
+  const N_TEXT = `q_text_${S}`;
+  const N_VIDEO = `q_video_${S}`;
+
+  await makeNode(N_TEXT, "text");
+  await makeNode(N_VIDEO, "video");
 
   // 按 runId 收集事件
   const byRun = new Map<string, string[]>();
@@ -79,25 +89,25 @@ async function main() {
 
   // —— 1) 先建连线，但上游文本还没产物 → 视频执行时应 failed ——
   await prisma.canvasEdge.create({
-    data: { id: "q_edge", workflowId: wf.id, source: "q_text", target: "q_video", index: 0 },
+    data: { id: `q_edge_${S}`, workflowId: wf.id, source: N_TEXT, target: N_VIDEO, index: 0 },
   });
-  const vRun1 = await enqueue("q_video", 135);
+  const vRun1 = await enqueue(N_VIDEO, 135);
   const vRow1 = await waitTerminal(vRun1);
   check("上游未就绪 → 执行时 failed", vRow1.status === "failed");
   check("failed 带错误原因", (vRow1.error ?? "").includes("上游节点还没生成产物"));
   check("failed 时 progress 归 0", vRow1.progress === 0);
 
   // —— 2) 文本入队，应 succeeded ——
-  const tRun = await enqueue("q_text", 2);
+  const tRun = await enqueue(N_TEXT, 2);
   const tRow = await waitTerminal(tRun);
   check("文本 succeeded", tRow.status === "succeeded");
   check("文本终态 progress=100", tRow.progress === 100);
   check("文本 NodeRun 有 output", !!tRow.output);
-  const tNodeData = JSON.parse((await prisma.canvasNode.findUnique({ where: { id: "q_text" } }))!.data);
+  const tNodeData = JSON.parse((await prisma.canvasNode.findUnique({ where: { id: N_TEXT } }))!.data);
   check("产物写回画布节点", tNodeData.status === "succeeded" && !!tNodeData.output);
 
   // —— 3) 上游现已就绪，视频再入队应 succeeded（边已在步骤 1 建好）——
-  const vRun2 = await enqueue("q_video", 135);
+  const vRun2 = await enqueue(N_VIDEO, 135);
   const vRow2 = await waitTerminal(vRun2);
   check("上游就绪后视频 succeeded", vRow2.status === "succeeded");
   check("视频终态 progress=100", vRow2.progress === 100);

@@ -7,6 +7,10 @@
  *   401 / 404
  * 运行：pnpm tsx scripts/check-skill-api.ts
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "../src/generated/prisma/client";
 

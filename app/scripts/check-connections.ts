@@ -3,6 +3,10 @@
  * M2 口径：连线不限制类型、不拦成环；只防「自连」和「重复边」。
  * 运行：pnpm tsx scripts/check-connections.ts
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 import type { Edge } from "@xyflow/react";
 import { checkConnection, type Endpoint } from "../src/lib/connections";
 

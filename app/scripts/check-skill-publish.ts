@@ -7,6 +7,10 @@
  *   POST /api/skills 真实登录会话（mine 可见、authorId、official=false、401/400）
  * 运行：pnpm tsx scripts/check-skill-publish.ts
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 import type { Edge, Node } from "@xyflow/react";
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "../src/generated/prisma/client";

@@ -3,6 +3,10 @@
  * 直接消费 createRunEventStream（与 route 同一核心），自建临时数据，跑完即清理。
  * 运行：pnpm tsx scripts/check-sse.ts
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 import { PrismaClient } from "../src/generated/prisma/client";
 import { createRunEventStream } from "../src/server/queue/runEventStream";
 import { runQueue } from "../src/server/queue/runQueue";

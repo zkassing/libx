@@ -6,6 +6,10 @@
  *  - 哈希对字段顺序不敏感（稳定序列化）。
  * 运行：pnpm tsx scripts/check-cache.ts
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 import { PrismaClient } from "../src/generated/prisma/client";
 import { runQueue } from "../src/server/queue/runQueue";
 import { hashInput } from "../src/server/queue/inputHash";

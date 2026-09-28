@@ -2,7 +2,11 @@
  * GenProvider（T2.1）自测：纯函数/异步直跑，不需要浏览器。
  * 运行：pnpm tsx scripts/check-providers.ts
  */
-import { getProvider, providers } from "../src/server/providers/registry";
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
+import { getProvider, getProviders, providerStatus } from "../src/server/providers/registry";
 import type { GenInput } from "../src/server/providers/types";
 
 let passed = 0;
@@ -27,7 +31,13 @@ function baseInput(over: Partial<GenInput> = {}): GenInput {
 
 async function main() {
   // —— 注册表 ——
+  const providers = getProviders();
   check("4 个产物种类都注册了 provider", Object.keys(providers).length === 4);
+  check(
+    "自测脚本强制走 mock（不会真调厂商 API）",
+    providerStatus().text === "mock" && providerStatus().video === "mock",
+    JSON.stringify(providerStatus()),
+  );
   check("text 节点 → text provider", getProvider("text").kind === "text");
   check("script 节点 → 复用 text provider", getProvider("script").kind === "text");
   check("image 节点 → image provider", getProvider("image").kind === "image");

@@ -4,6 +4,10 @@
  *
  * 直接操作 zustand store（不需要浏览器；@xyflow/react 的核心工具是纯函数）
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 import { HISTORY_LABEL_TEXT, useCanvasStore } from "../src/stores/canvasStore";
 import { useRunStore } from "../src/stores/runStore";
 

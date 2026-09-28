@@ -7,6 +7,10 @@
  * 注意：RUN_TIMEOUT_MS 必须在 import runQueue **之前**设置（模块加载时读它），
  * 所以这里把 timeout 调小到 3s，用 6.5s 的 video mock 来制造超时，无需真等 5 分钟。
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 process.env.RUN_TIMEOUT_MS = "3000";
 
 import { PrismaClient } from "../src/generated/prisma/client";

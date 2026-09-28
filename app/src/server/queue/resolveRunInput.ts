@@ -82,6 +82,7 @@ export async function resolveUpstreams(workflowId: string, nodeId: string) {
       title: display,
       kind: ud.kind,
       summary: ud.output.text?.slice(0, 200) ?? ud.output.urls?.[0] ?? "",
+      ...(ud.output.urls?.length ? { urls: ud.output.urls } : {}),
     });
   }
 

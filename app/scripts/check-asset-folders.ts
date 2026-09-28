@@ -7,6 +7,10 @@
  *  - 删除文件夹后资产回到待分类（SetNull）、子文件夹级联删除。
  * 运行：pnpm tsx scripts/check-asset-folders.ts
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 import { PrismaClient } from "../src/generated/prisma/client";
 
 const prisma = new PrismaClient();

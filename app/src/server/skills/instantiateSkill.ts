@@ -5,6 +5,7 @@ import type {
   FlowNodeData,
 } from "@/types";
 import type { SkillTemplate } from "@/lib/skillTypes";
+import { NODE_META } from "@/lib/nodeTypes";
 
 /* ------------------------------------------------------------------ */
 /* Skill 模板 → 画布节点/边（纯函数，服务端启动 API 与前端复用）            */
@@ -49,6 +50,10 @@ export function instantiateSkillTemplate(
     idBySeed.set(tn._seedId, id);
 
     const params: NodeParams = {
+      // 先铺该节点种类的默认参数（model / mode / 比例 / 时长…），模板里显式声明的覆盖它。
+      // 不铺的话，Skill 建出来的节点 params 是空的，画布右侧模型下拉会显示未选中，
+      // 服务端也就只能靠种类兜底了。
+      ...((NODE_META[kind]?.defaults ?? {}) as NodeParams),
       ...(tn.params as NodeParams | undefined),
     };
 

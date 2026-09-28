@@ -2,6 +2,10 @@
  * runStore（T2.5）自测：SSE 事件 → 节点运行状态的归并。
  * 运行：pnpm tsx scripts/check-runstore.ts
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 import { useRunStore, type RunEventPayload } from "../src/stores/runStore";
 
 let passed = 0;

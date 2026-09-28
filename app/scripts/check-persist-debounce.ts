@@ -2,6 +2,10 @@
  * 持久化防抖的自测（不需要浏览器）
  * 运行：pnpm tsx scripts/check-persist-debounce.ts
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 import { createDebouncedLocalStorage } from "../src/lib/debouncedStorage";
 
 /* 假的 localStorage：统计真实写入次数 */

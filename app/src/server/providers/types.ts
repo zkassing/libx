@@ -23,6 +23,11 @@ export interface GenUpstream {
   kind: NodeKind;
   /** 上游产物的可读摘要 */
   summary: string;
+  /**
+   * 上游产物的媒体地址（仅 image/video/audio 类上游有值）。
+   * 真实厂商做「图生视频」时需要拿到真实图片地址当首帧，光有文字摘要不够。
+   */
+  urls?: string[];
 }
 
 /** 一次生成调用的输入 */

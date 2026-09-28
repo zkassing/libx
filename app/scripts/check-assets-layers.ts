@@ -8,6 +8,10 @@
  *  - 纯函数 assetKindOf / firstMediaUrl。
  * 运行：pnpm tsx scripts/check-assets-layers.ts
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 import { PrismaClient } from "../src/generated/prisma/client";
 import { runQueue } from "../src/server/queue/runQueue";
 import { assetKindOf, firstMediaUrl } from "../src/server/queue/recordAsset";

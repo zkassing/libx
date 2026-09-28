@@ -2,6 +2,10 @@
  * 一键整理（autoLayout）的自测
  * 运行：pnpm tsx scripts/check-layout.ts
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 import type { Edge, Node } from "@xyflow/react";
 import { autoLayoutNodes } from "../src/lib/layout";
 import { NODE_SIZE, type FlowNodeData, type NodeKind } from "../src/types";

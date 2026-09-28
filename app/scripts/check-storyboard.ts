@@ -7,6 +7,10 @@
  *   mock provider：text/script 产出 shots；video 产出可播放 MP4（端到端）
  * 运行：pnpm tsx scripts/check-storyboard.ts
  */
+
+// 自测一律走 mock provider：绝不能因为 .env 里有 ARK_API_KEY 就真花钱调厂商 API
+process.env.FORCE_MOCK_PROVIDERS = "1";
+
 import type { Node } from "@xyflow/react";
 import {
   buildMockShots,
