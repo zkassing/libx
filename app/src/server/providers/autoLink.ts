@@ -1,4 +1,4 @@
-import type { NodeKind } from "@/types";
+import type { NodeAction, NodeKind } from "@/types";
 import type { GenUpstream } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -11,6 +11,8 @@ import type { GenUpstream } from "./types";
 /*   并把 supplementary.aspect_ratio 带进比例参数（用户没动过手，跟随上游）*/
 /* - 下游【已写提示词】→ 用户优先：保留用户提示词，action_input 追加为     */
 /*   "参考"上下文；参数不动（不覆盖用户的显式选择）                        */
+/* - 【多个上游契约】→ 融合：两份 action_input 都要进提示词（过去只取      */
+/*   第一份，第二个文本节点的内容被丢掉，画面不融合）                       */
 /* ------------------------------------------------------------------ */
 
 export interface AutoLinkResult {
@@ -35,35 +37,48 @@ export function applyAutoLink(
     return { prompt, params, linked: false };
   }
 
-  const hit = (upstreams ?? [])
+  const hits = (upstreams ?? [])
     .map((u) => u.action)
-    .find((a) => a?.action_input?.trim());
-  if (!hit) return { prompt, params, linked: false };
+    .filter((a): a is NodeAction => !!a?.action_input?.trim());
+  if (!hits.length) return { prompt, params, linked: false };
 
-  const actionInput = hit.action_input.trim();
+  const inputs = hits.map((h) => h.action_input.trim());
   const userPrompt = prompt.trim();
 
-  // 用户已写提示词：action_input 追加为参考上下文，参数不动
+  // 多个上游契约：两份画面提示词都要体现，显式要求模型融合；
+  // 单个契约：保持原样接管（不包一层，提示词更干净）
+  const merged =
+    inputs.length === 1
+      ? inputs[0]
+      : `融合创作一个画面，同时体现以下要素：\n${inputs
+          .map((t, i) => `${i + 1}）${t}`)
+          .join("\n")}`;
+
+  // 用户已写提示词：契约追加为参考上下文，参数不动
   if (userPrompt) {
+    const ref =
+      inputs.length === 1
+        ? `参考上游：${inputs[0]}`
+        : `参考上游（需融合）：\n${inputs.map((t, i) => `${i + 1}）${t}`).join("\n")}`;
     return {
-      prompt: `${userPrompt}\n\n参考上游：${actionInput}`,
+      prompt: `${userPrompt}\n\n${ref}`,
       params,
       linked: true,
-      action: hit.action,
+      action: hits[0].action,
     };
   }
 
-  // 用户没写提示词：契约接管提示词与比例建议
-  const ratio = hit.supplementary?.aspect_ratio;
+  // 用户没写提示词：契约接管提示词与比例建议（取第一个给出比例的契约）
+  const ratio = hits
+    .map((h) => h.supplementary?.aspect_ratio)
+    .find((r): r is string => typeof r === "string" && !!r.trim());
   return {
-    prompt: actionInput,
+    prompt: merged,
     params: {
       ...params,
-      ...(typeof ratio === "string" && ratio.trim()
-        ? { aspectRatio: ratio.trim() }
-        : {}),
+      ...(ratio ? { aspectRatio: ratio.trim() } : {}),
     },
     linked: true,
-    action: hit.action,
+    action: hits[0].action,
   };
 }

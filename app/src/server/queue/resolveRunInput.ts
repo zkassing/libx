@@ -56,6 +56,8 @@ export async function loadOwnedNode(
 export async function resolveUpstreams(workflowId: string, nodeId: string) {
   const incomingEdges = await prisma.canvasEdge.findMany({
     where: { workflowId, target: nodeId },
+    // 按连线创建顺序取上游：多上游契约融合时的 1）2）顺序稳定，缓存哈希才可复现
+    orderBy: { index: "asc" },
   });
   const upstreamIds = incomingEdges.map((e) => e.source);
   const upstreamRows = upstreamIds.length

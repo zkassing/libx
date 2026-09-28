@@ -90,6 +90,33 @@ console.log("== applyAutoLink 规则 ==");
   assert(r.linked && r.prompt === "一只柴犬" && r.params?.aspectRatio === "4:3", "无比例建议：保留原比例");
 }
 
+// 6.5) 两个文本上游 → 两份 action_input 融合，不是只取第一个
+{
+  const ACTION2: NodeAction = {
+    action: "text_to_image",
+    action_input: "穿红色机甲的少女，站在高楼天台边缘",
+    supplementary: { style: "科幻", aspect_ratio: "16:9" },
+  };
+  const up2: GenUpstream = { ...upstreamWithAction, nodeId: "text_2", title: "文本节点 2", action: ACTION2 };
+
+  // 空提示词：融合两份契约
+  const r1 = applyAutoLink("image", "", {}, [upstreamWithAction, up2]);
+  assert(r1.linked, "双上游空提示词：linked=true");
+  assert(r1.prompt.includes(ACTION.action_input), "双上游空提示词：含第一份契约");
+  assert(r1.prompt.includes(ACTION2.action_input), "双上游空提示词：含第二份契约（融合）");
+  assert(r1.prompt.includes("融合"), "双上游空提示词：带融合指令");
+  assert(r1.params?.aspectRatio === "9:16", "双上游空提示词：取第一个比例建议");
+
+  // 有提示词：两份契约都作参考
+  const r2 = applyAutoLink("image", "俯视角", {}, [upstreamWithAction, up2]);
+  assert(r2.prompt.startsWith("俯视角"), "双上游有提示词：用户提示词在前");
+  assert(r2.prompt.includes(ACTION.action_input) && r2.prompt.includes(ACTION2.action_input), "双上游有提示词：两份契约都参考");
+
+  // 单上游：不包融合层，保持干净接管（回归）
+  const r3 = applyAutoLink("image", "", {}, [upstreamWithAction]);
+  assert(r3.prompt === ACTION.action_input, "单上游：不包融合层");
+}
+
 async function main() {
   console.log("\n== mock 文本 provider 产出契约 ==");
 
