@@ -71,6 +71,16 @@ model Workflow {
   variables Variable[]
   /** 首页项目卡片封面（默认取画布内最近的图片/视频产物） */
   coverUrl  String?
+  /** 一句话说明（分享页/项目卡片展示用） */
+  description String?
+  /** 分享 token。非空 = 已开启分享，凭链接可预览 */
+  shareToken String?     @unique
+  /** private | link —— link 表示拿到链接的人都能看 */
+  visibility String      @default("private")
+  /** 分享开启/刷新时间 */
+  sharedAt  DateTime?
+  /** 复制来源工作流 id（展示“改编自…”；源被删也不级联，只留 id） */
+  forkedFrom String?
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 

@@ -26,6 +26,7 @@ export async function GET() {
       id: true,
       title: true,
       coverUrl: true,
+      shareToken: true,
       updatedAt: true,
       _count: { select: { nodes: true } },
     },

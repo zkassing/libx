@@ -6,8 +6,10 @@ import * as React from "react";
 import {
   Archive,
   ChevronLeft,
+  Copy,
   FolderPlus,
   ImageIcon,
+  Link2,
   Loader2,
   Plus,
   Search,
@@ -19,6 +21,8 @@ type ProjectCard = {
   id: string;
   title: string;
   coverUrl: string | null;
+  /** 非空 = 已开启分享 */
+  shareToken: string | null;
   updatedAt: string;
   _count: { nodes: number };
 };
@@ -99,6 +103,24 @@ export default function ProjectHomePage() {
     if (!ok) return;
     const res = await fetch(`/api/workflows/${id}`, { method: "DELETE" });
     if (res.ok) void load();
+  }
+
+  /** 复制副本（服务端重映射节点 id，副本运行态会被清空） */
+  async function duplicateProject(e: React.MouseEvent, id: string) {
+    e.stopPropagation();
+    setError(null);
+    try {
+      const res = await fetch(`/api/workflows/${id}/duplicate`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        setError(`复制项目失败（${res.status}），请重试`);
+        return;
+      }
+      await load();
+    } catch {
+      setError("网络异常，复制项目失败");
+    }
   }
 
   const shown = query.trim()
@@ -185,13 +207,31 @@ export default function ProjectHomePage() {
                         <ImageIcon className="h-9 w-9" />
                       </div>
                     )}
-                    <button
-                      onClick={(e) => removeProject(e, p.id)}
-                      className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-md bg-black/55 text-white/70 opacity-0 transition hover:bg-red-500/80 hover:text-white group-hover:opacity-100"
-                      title="删除项目"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    {p.shareToken && (
+                      <span
+                        className="absolute left-2 top-2 flex h-7 items-center gap-1 rounded-md bg-black/55 px-2 text-[11px] text-white/75 backdrop-blur"
+                        title="已开启分享"
+                      >
+                        <Link2 className="h-3 w-3" />
+                        已分享
+                      </span>
+                    )}
+                    <div className="absolute right-2 top-2 flex gap-1.5 opacity-0 transition group-hover:opacity-100">
+                      <button
+                        onClick={(e) => duplicateProject(e, p.id)}
+                        className="flex h-7 w-7 items-center justify-center rounded-md bg-black/55 text-white/70 transition hover:bg-[#1677ff]/85 hover:text-white"
+                        title="复制副本"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => removeProject(e, p.id)}
+                        className="flex h-7 w-7 items-center justify-center rounded-md bg-black/55 text-white/70 transition hover:bg-red-500/80 hover:text-white"
+                        title="删除项目"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-2 px-0.5">
                     <div className="truncate text-[13px] font-medium text-white/90">{p.title}</div>

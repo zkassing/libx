@@ -19,6 +19,16 @@ async function ownedWorkflow(id: string, userId: string) {
   return wf;
 }
 
+/** Prisma 唯一约束冲突（P2002） */
+function isUniqueError(e: unknown): boolean {
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    "code" in e &&
+    (e as { code?: unknown }).code === "P2002"
+  );
+}
+
 /** GET /api/workflows/:id —— 读取工作流（含节点/边） */
 export async function GET(_req: Request, ctx: Ctx) {
   const session = await auth();
@@ -43,7 +53,12 @@ export async function GET(_req: Request, ctx: Ctx) {
   ]);
 
   return NextResponse.json({
-    workflow: { id: wf.id, title: wf.title, updatedAt: wf.updatedAt },
+    workflow: {
+      id: wf.id,
+      title: wf.title,
+      shareToken: wf.shareToken,
+      updatedAt: wf.updatedAt,
+    },
     nodes: nodeRows.map(rowToNode),
     edges: edgeRows.map(rowToEdge),
   });
@@ -78,22 +93,35 @@ export async function PUT(req: Request, ctx: Ctx) {
   const nodes = Array.isArray(body.nodes) ? body.nodes : [];
   const edges = Array.isArray(body.edges) ? body.edges : [];
 
-  await prisma.$transaction([
-    prisma.canvasEdge.deleteMany({ where: { workflowId: id } }),
-    prisma.canvasNode.deleteMany({ where: { workflowId: id } }),
-    prisma.workflow.update({
-      where: { id },
-      data: {
-        ...(body.title?.trim() ? { title: body.title.trim() } : {}),
-        nodes: {
-          create: nodes.map((n, i) => nodeToRow(n, i)),
+  try {
+    await prisma.$transaction([
+      prisma.canvasEdge.deleteMany({ where: { workflowId: id } }),
+      prisma.canvasNode.deleteMany({ where: { workflowId: id } }),
+      prisma.workflow.update({
+        where: { id },
+        data: {
+          ...(body.title?.trim() ? { title: body.title.trim() } : {}),
+          nodes: {
+            create: nodes.map((n, i) => nodeToRow(n, i)),
+          },
+          edges: {
+            create: edges.map((e, i) => edgeToRow(e, i)),
+          },
         },
-        edges: {
-          create: edges.map((e, i) => edgeToRow(e, i)),
-        },
-      },
-    }),
-  ]);
+      }),
+    ]);
+  } catch (e) {
+    // 节点/边 id 是全局主键：若某个 id 已被**别的**工作流占用，这里会撞唯一约束。
+    // 正常客户端生成的 id（kind_时间戳+随机）不会撞，但手工构造/导入的数据可能撞。
+    // 不把它暴露成 500，回 409 让前端能识别并提示。
+    if (isUniqueError(e)) {
+      return NextResponse.json(
+        { error: "节点 id 与已有数据冲突，请刷新页面后重试" },
+        { status: 409 },
+      );
+    }
+    throw e;
+  }
 
   const updated = await prisma.workflow.findUnique({
     where: { id },

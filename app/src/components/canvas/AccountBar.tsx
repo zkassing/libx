@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ShortcutsDialog } from "@/components/canvas/ShortcutsDialog";
+import { ShareDialog } from "@/components/canvas/ShareDialog";
 import { useCanvasStore } from "@/stores/canvasStore";
 
 /** 画布右上角浮条：保存状态 + 分享 + 帮助 + 会员 + 积分 + 账号（对齐 LibTV） */
@@ -28,6 +29,7 @@ export function AccountBar() {
   const { data: session } = useSession();
   const user = session?.user;
   const [helpOpen, setHelpOpen] = React.useState(false);
+  const [shareOpen, setShareOpen] = React.useState(false);
 
   return (
     <header className="pointer-events-none absolute top-3 right-4 z-30 flex items-center gap-2">
@@ -38,14 +40,14 @@ export function AccountBar() {
       <Tooltip>
         <TooltipTrigger asChild>
           <button
-            className="pointer-events-auto flex size-8 cursor-not-allowed items-center justify-center rounded-lg text-white/25"
-            aria-disabled="true"
+            onClick={() => setShareOpen(true)}
+            className="pointer-events-auto flex size-8 items-center justify-center rounded-lg text-white/55 transition hover:bg-white/8 hover:text-white"
             aria-label="分享"
           >
             <Share2 className="size-4" />
           </button>
         </TooltipTrigger>
-        <TooltipContent>分享链接 · M3 接入</TooltipContent>
+        <TooltipContent>分享工作流</TooltipContent>
       </Tooltip>
 
       <Tooltip>
@@ -129,6 +131,7 @@ export function AccountBar() {
       </DropdownMenu>
 
       <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} />
+      <ShareDialog open={shareOpen} onOpenChange={setShareOpen} />
     </header>
   );
 }
