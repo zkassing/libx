@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Columns2,
   FolderOpen,
+  House,
   PanelLeftClose,
   Redo2,
   Save,
@@ -59,8 +60,9 @@ export function Sidebar() {
       style={{ width }}
       className="z-30 flex h-full shrink-0 flex-col border-r border-white/8 bg-[#17171a]/95 backdrop-blur-xl"
     >
-      {/* 顶部第一行：Logo + 视图切换 + 收起 */}
+      {/* 顶部第一行：返回首页 + Logo + 视图切换 + 收起 */}
       <div className="flex items-center gap-2 px-3 pt-3">
+        <HomeButton />
         <WorkspaceMenu />
         <div className="ml-auto flex items-center gap-1">
           <ViewSwitch />
@@ -158,6 +160,8 @@ export function CollapsedHeader() {
 
   return (
     <div className="absolute top-3 left-4 z-30 flex items-center gap-1.5 rounded-lg bg-[#17171a]/85 p-1 backdrop-blur-xl">
+      <HomeButton />
+      <span className="h-4 w-px bg-white/15" />
       <span className="flex h-7 w-7 items-center justify-center text-white/90">
         <LogoMark />
       </span>
@@ -289,6 +293,25 @@ function TabBtn({
     >
       {children}
     </button>
+  );
+}
+
+/** 返回首页（/project）。画布内回项目的统一出口。 */
+function HomeButton() {
+  const router = useRouter();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={() => router.push("/project")}
+          aria-label="返回首页"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-white/55 transition hover:bg-white/8 hover:text-white"
+        >
+          <House className="h-4 w-4" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>返回首页</TooltipContent>
+    </Tooltip>
   );
 }
 
