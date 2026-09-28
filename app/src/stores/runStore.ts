@@ -35,6 +35,8 @@ export interface NodeRunState {
 interface RunStore {
   /** nodeId → 最近一次运行状态 */
   nodeStatus: Record<string, NodeRunState>;
+  /** 本次 apply 实际改动的节点 id（桥接只同步它，避免旧条目覆盖其他节点） */
+  lastChangedId: string | null;
 
   /** 应用一条 SSE 事件 */
   apply: (e: RunEventPayload) => void;
@@ -61,6 +63,7 @@ function toStatus(type: RunEventPayload["type"]): RunStatus {
 
 export const useRunStore = create<RunStore>((set) => ({
   nodeStatus: {},
+  lastChangedId: null,
 
   apply: (e) => {
     const prev = useRunStore.getState().nodeStatus[e.nodeId];
@@ -85,12 +88,13 @@ export const useRunStore = create<RunStore>((set) => ({
 
     set((s) => ({
       nodeStatus: { ...s.nodeStatus, [e.nodeId]: next },
+      lastChangedId: e.nodeId,
     }));
   },
 
   reset: (nodeIds) =>
     set((s) => {
-      if (!nodeIds) return { nodeStatus: {} };
+      if (!nodeIds) return { nodeStatus: {}, lastChangedId: null };
       const drop = new Set(nodeIds);
       const next = Object.fromEntries(
         Object.entries(s.nodeStatus).filter(([id]) => !drop.has(id)),

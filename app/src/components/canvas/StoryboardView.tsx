@@ -30,6 +30,7 @@ export function StoryboardView() {
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   const appendGraph = useCanvasStore((s) => s.appendGraph);
   const runNode = useCanvasStore((s) => s.runNode);
+  const flushCloudSave = useCanvasStore((s) => s.flushCloudSave);
   const setViewMode = useCanvasPrefs((s) => s.setViewMode);
 
   const [busy, setBusy] = React.useState<Record<string, BusyKind>>({});
@@ -37,16 +38,16 @@ export function StoryboardView() {
 
   const entries = React.useMemo(() => collectStoryboard(nodes), [nodes]);
 
-  /** 回写某来源节点的 shots */
+  /** 回写某来源节点的 shots（实时读 store，不能用闭包旧 nodes） */
   const writeShots = (nodeId: string, shots: Shot[]) => {
-    const node = nodes.find((n) => n.id === nodeId);
-    if (!node?.data.output) return;
-    updateNodeData(nodeId, { output: { ...node.data.output, shots } });
+    const current = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
+    if (!current?.data.output) return;
+    updateNodeData(nodeId, { output: { ...current.data.output, shots } });
   };
 
   const toggleConfirm = (nodeId: string, shot: Shot) => {
     const shots =
-      nodes.find((n) => n.id === nodeId)?.data.output?.shots ?? [];
+      useCanvasStore.getState().nodes.find((n) => n.id === nodeId)?.data.output?.shots ?? [];
     writeShots(
       nodeId,
       shots.map((s) =>
@@ -57,7 +58,8 @@ export function StoryboardView() {
 
   /** P3：一键创建选中镜头的分镜图节点并运行 */
   const genImages = async (nodeId: string) => {
-    const built = buildImageNodes(nodes, nodeId);
+    // 实时读 store（闭包 nodes 可能还是确认前快照）
+    const built = buildImageNodes(useCanvasStore.getState().nodes, nodeId);
     if (built.nodes.length === 0) return;
     appendGraph(built.nodes, built.edges);
     writeShots(nodeId, built.shots);
@@ -66,6 +68,8 @@ export function StoryboardView() {
       built.nodes.forEach((n) => (nb[n.id] = "image"));
       return nb;
     });
+    // 必须等新节点 PUT 到云端后再 run，否则后端 404
+    await flushCloudSave();
     for (const n of built.nodes) {
       void runNode(n.id);
     }
@@ -84,6 +88,8 @@ export function StoryboardView() {
       built.nodes.forEach((n) => (nb[n.id] = "video"));
       return nb;
     });
+    // 同上：先落库再 run
+    await flushCloudSave();
     for (const n of built.nodes) {
       void runNode(n.id);
     }
@@ -174,6 +180,7 @@ export function StoryboardView() {
                       onToggleConfirm={() => toggleConfirm(entry.nodeId, shot)}
                       onGenImage={() => genImages(entry.nodeId)}
                       onGenVideo={() => genVideos(entry.nodeId)}
+                      onRetryNode={(nodeId) => void runNode(nodeId)}
                     />
                   ))}
                 </div>
@@ -196,6 +203,7 @@ function ShotTrack({
   onToggleConfirm,
   onGenImage,
   onGenVideo,
+  onRetryNode,
 }: {
   shot: Shot;
   nodes: ReturnType<typeof useCanvasStore.getState>["nodes"];
@@ -203,6 +211,7 @@ function ShotTrack({
   onToggleConfirm: () => void;
   onGenImage: () => void;
   onGenVideo: () => void;
+  onRetryNode: (nodeId: string) => void;
 }) {
   const imgNode = shot.imageNodeId
     ? nodes.find((n) => n.id === shot.imageNodeId)
@@ -260,6 +269,7 @@ function ShotTrack({
         busy={!!(imgNode && busy[imgNode.id])}
         emptyHint="确认镜头后生成分镜图"
         onRun={onGenImage}
+        onRetry={onRetryNode}
       />
 
       {/* 视频列 */}
@@ -269,6 +279,7 @@ function ShotTrack({
         busy={!!(vidNode && busy[vidNode.id])}
         emptyHint="分镜图完成后生成视频"
         onRun={onGenVideo}
+        onRetry={onRetryNode}
         isVideo
       />
     </div>
@@ -282,6 +293,7 @@ function StageCell({
   busy,
   emptyHint,
   onRun,
+  onRetry,
   isVideo = false,
 }: {
   ready: boolean;
@@ -289,6 +301,7 @@ function StageCell({
   busy: boolean;
   emptyHint: string;
   onRun: () => void;
+  onRetry: (nodeId: string) => void;
   isVideo?: boolean;
 }) {
   const url = node?.data.output?.urls?.[0];
@@ -346,7 +359,7 @@ function StageCell({
           {statusLabel(status)}
         </div>
         {status === "failed" && (
-          <button onClick={onRun} className="mt-1 text-[10.5px] text-[#1677ff] hover:underline">
+          <button onClick={() => onRetry(node.id)} className="mt-1 text-[10.5px] text-[#1677ff] hover:underline">
             重试
           </button>
         )}

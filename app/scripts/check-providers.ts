@@ -72,8 +72,8 @@ async function main() {
     baseInput({ nodeKind: "video" }),
     { runId: "run4" },
   );
-  check("视频产物是 svg data URL", vRes.urls![0].startsWith("data:image/svg+xml"));
-  check("视频产物标注 VIDEO", decodeURIComponent(vRes.urls![0]).includes("VIDEO"));
+  // 视频产物为真实可播放 MP4（P5 顺序连播依赖 onEnded）
+  check("视频产物是 /mock-clips/*.mp4", /^\/mock-clips\/[a-f0-9]+\.mp4$/.test(vRes.urls![0]), vRes.urls![0]);
 
   // —— 音频生成 ——
   const aRes = await getProvider("audio").generate(

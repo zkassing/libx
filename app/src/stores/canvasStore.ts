@@ -86,7 +86,7 @@ function scheduleCloudSave(delay = CLOUD_SAVE_DELAY) {
 }
 
 /** 立刻取消待写并把在途保存跑完（pagehide / beforeunload 用） */
-async function flushCloudSave() {
+async function flushPendingCloudSave() {
   if (cloudSaveTimer) {
     clearTimeout(cloudSaveTimer);
     cloudSaveTimer = null;
@@ -172,6 +172,11 @@ export interface CanvasState {
   bindWorkflow: (workflowId: string) => Promise<void>;
   /** 立即把当前图 PUT 到云端（正常由防抖自动调用） */
   saveToCloud: () => Promise<void>;
+  /**
+   * 取消待写防抖并立即 PUT（新增节点后需立刻 run 时先 await，
+   * 否则后端还没有新节点会 404）。
+   */
+  flushCloudSave: () => Promise<void>;
   /** 请求一次防抖保存（编辑后调用，合并连续改动） */
   requestCloudSave: () => void;
 }
@@ -716,7 +721,7 @@ export const useCanvasStore = create<CanvasState>()(
         }
       },
 
-      saveToCloud: async () => {
+  saveToCloud: async () => {
         const s = get();
         if (!s.workflowId) return;
         set({ cloudStatus: "saving", cloudError: null });
@@ -743,6 +748,8 @@ export const useCanvasStore = create<CanvasState>()(
       requestCloudSave: () => {
         scheduleCloudSave();
       },
+
+      flushCloudSave: () => flushPendingCloudSave(),
     }),
     {
       name: "aiteach-canvas",
@@ -793,33 +800,42 @@ export const useCanvasStore = create<CanvasState>()(
  */
 {
   useRunStore.subscribe(() => {
-    const map = useRunStore.getState().nodeStatus;
+    const rs = useRunStore.getState();
+    const map = rs.nodeStatus;
+    const changedId = rs.lastChangedId;
     const canvas = useCanvasStore.getState();
-    let touched = false;
 
-    const nextNodes = canvas.nodes.map((n) => {
-      const r = map[n.id];
-      if (!r) return n;
-      const d = n.data;
-      const out = r.output as FlowNodeData["output"];
-      const same =
-        d.status === r.status &&
-        d.progress === r.progress &&
-        (d.output ?? undefined) === (out ?? undefined);
-      if (same) return n;
-      touched = true;
-      return {
-        ...n,
-        data: {
-          ...d,
-          status: r.status,
-          progress: r.progress,
-          output: out ?? d.output,
-        },
-      };
-    });
-
-    if (touched) useCanvasStore.setState({ nodes: nextNodes });
+    // 只同步本次事件实际改动的节点。
+    // （否则 map 里其他节点的旧 output 快照会把画布上已更新的节点覆盖回去）
+    if (changedId) {
+      const r = map[changedId];
+      const node = canvas.nodes.find((n) => n.id === changedId);
+      if (r && node) {
+        const d = node.data;
+        const out = r.output as FlowNodeData["output"];
+        const same =
+          d.status === r.status &&
+          d.progress === r.progress &&
+          (d.output ?? undefined) === (out ?? undefined);
+        if (!same) {
+          useCanvasStore.setState({
+            nodes: canvas.nodes.map((n) =>
+              n.id === changedId
+                ? {
+                    ...n,
+                    data: {
+                      ...d,
+                      status: r.status,
+                      progress: r.progress,
+                      output: out ?? d.output,
+                    },
+                  }
+                : n,
+            ),
+          });
+        }
+      }
+    }
 
     // 任一节点进入终态 → 解除历史暂停（与 beginHistoryPause 配对）
     if (canvas.historyPause > 0) {
@@ -852,11 +868,11 @@ if (typeof window !== "undefined") {
   });
 
   // 关闭 / 隐藏页面时把在途保存跑完
-  const flush = () => void flushCloudSave();
+  const flush = () => void flushPendingCloudSave();
   window.addEventListener("beforeunload", flush);
   window.addEventListener("pagehide", flush);
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") void flushCloudSave();
+    if (document.visibilityState === "hidden") void flushPendingCloudSave();
   });
 }
 

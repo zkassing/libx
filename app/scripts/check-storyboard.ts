@@ -1,9 +1,10 @@
 /**
- * 故事板（分镜）自测（成片流水线 P1+P2）。
+ * 故事板（分镜）自测（成片流水线 P1–P5）。
  * 覆盖：
  *   buildMockShots / extractTopic / shotsToText（P1 纯函数）
  *   collectStoryboard / totalShots / confirmedShots（P2 聚合）
- *   mock provider：text/script 产出 output.shots（端到端）
+ *   buildImageNodes（P3）/ buildVideoNodes（P4）/ FinalFilm 片段组装（P5）
+ *   mock provider：text/script 产出 shots；video 产出可播放 MP4（端到端）
  * 运行：pnpm tsx scripts/check-storyboard.ts
  */
 import type { Node } from "@xyflow/react";
@@ -18,7 +19,13 @@ import {
   confirmedShots,
 } from "../src/lib/storyboard";
 import { getProvider } from "../src/server/providers/registry";
+import {
+  buildImageNodes,
+  buildVideoNodes,
+} from "../src/server/skills/shotPipeline";
+import { mockClipDuration } from "../src/server/providers/mockClips";
 import type { FlowNodeData, Shot } from "../src/types";
+import { NODE_SIZE } from "../src/types";
 
 let passed = 0;
 let failed = 0;
@@ -84,6 +91,75 @@ const confirmed = shots.map((s) => ({ ...s, confirmed: true }));
 const entries2 = collectStoryboard([mkNode("a", "script", confirmed)]);
 check("确认计数", confirmedShots(entries2) === 5, String(confirmedShots(entries2)));
 
+/* ---- P3 buildImageNodes ---- */
+function mkPipelineNode(id: string, kind: FlowNodeData["kind"], outShots?: Shot[], pos = { x: 0, y: 0 }): Node<FlowNodeData> {
+  return {
+    id, type: kind, position: pos,
+    measured: { width: NODE_SIZE[kind].w, height: NODE_SIZE[kind].h },
+    style: { width: NODE_SIZE[kind].w, height: NODE_SIZE[kind].h },
+    data: {
+      kind, title: `${kind}节点`, prompt: "p", params: {},
+      status: "idle", progress: 0,
+      output: outShots ? { kind, shots: outShots } : undefined,
+    },
+  };
+}
+
+const p3Shots = buildMockShots("测试主题", 4).map((s) => ({ ...s, confirmed: true }));
+let src = mkPipelineNode("src", "script", p3Shots);
+const p3 = buildImageNodes([src], "src");
+check("P3 为 4 个已确认镜头各建 1 图节点", p3.nodes.length === 4, String(p3.nodes.length));
+check("P3 建 4 条 source→image 边", p3.edges.length === 4);
+check("P3 图节点类型正确", p3.nodes.every((n) => n.data.kind === "image"));
+check("P3 回写 imageNodeId", p3.shots.every((s) => !!s.imageNodeId));
+check("P3 imageNodeId 指向新节点", p3.shots.every((s, i) => s.imageNodeId === p3.nodes[i].id));
+check("P3 边引用一致", p3.edges.every((e, i) => e.source === "src" && e.target === p3.nodes[i].id));
+check("P3 节点在来源右侧", p3.nodes.every((n) => n.position.x > src.position.x + NODE_SIZE.script.w));
+check("P3 纵向错开不重叠", p3.nodes[1].position.y - p3.nodes[0].position.y >= NODE_SIZE.image.h);
+check("P3 提示词带镜头号", p3.nodes[0].data.prompt.includes("镜头1"));
+
+// 未确认镜头不建节点
+const mixed = buildMockShots("x", 3);
+const srcMixed = mkPipelineNode("m", "script", mixed);
+check("P3 未确认不建图", buildImageNodes([srcMixed], "m").nodes.length === 0);
+
+// 已有 imageNodeId 的镜头跳过（幂等）
+src = mkPipelineNode("src", "script", p3.shots);
+check("P3 幂等：重跑不重复建", buildImageNodes([src], "src").nodes.length === 0);
+
+// 不存在的来源
+check("P3 来源缺失返回空", buildImageNodes([src], "nope").nodes.length === 0);
+
+/* ---- P4 buildVideoNodes ---- */
+// 把 P3 的图节点放进画布，更新 source 的 shots
+let afterP3: Node<FlowNodeData>[] = [
+  mkPipelineNode("src", "script", p3.shots),
+  ...p3.nodes,
+];
+const p4 = buildVideoNodes(afterP3, "src");
+check("P4 为 4 个图节点各建 1 视频", p4.nodes.length === 4, String(p4.nodes.length));
+check("P4 建 4 条 image→video 边", p4.edges.length === 4);
+check("P4 视频节点 mode=图生视频", p4.nodes.every((n) => n.data.params.mode === "图生视频"));
+check("P4 视频时长=镜头时长", p4.nodes.every((n, i) => n.data.params.duration === p3.shots[i].duration));
+check("P4 回写 videoNodeId", p4.shots.every((s) => !!s.videoNodeId));
+check("P4 边从分镜图出发", p4.edges.every((e, i) => e.source === p3.nodes[i].id && e.target === p4.nodes[i].id));
+check("P4 视频在图节点右侧", p4.nodes.every((n) => n.position.x > p3.nodes[0].position.x + NODE_SIZE.image.w));
+check("P4 纵向对齐图节点", p4.nodes.every((n, i) => n.position.y === p3.nodes[i].position.y));
+afterP3 = [
+  mkPipelineNode("src", "script", p4.shots),
+  ...p3.nodes,
+  ...p4.nodes,
+];
+check("P4 幂等：重跑不重复建", buildVideoNodes(afterP3, "src").nodes.length === 0);
+
+// 没有图节点的镜头不建视频
+const noImg = buildMockShots("x", 2).map((s) => ({ ...s, confirmed: true }));
+const srcNoImg = mkPipelineNode("n2", "script", noImg);
+check("P4 无图不建视频", buildVideoNodes([srcNoImg], "n2").nodes.length === 0);
+
+// mock 时长钳制
+check("mockClipDuration 钳制 1..6", mockClipDuration(0) === 1 && mockClipDuration(99) === 6 && mockClipDuration(3) === 3);
+
 /* ---- 端到端：provider 产出 shots ---- */
 async function main2() {
   async function providerShots(kind: "text" | "script") {
@@ -99,6 +175,15 @@ async function main2() {
   check("text 文本含分镜块", rt.text?.includes("分镜") ?? false);
   const rs = await providerShots("script");
   check("script 产物含 shots", Array.isArray(rs.shots) && rs.shots!.length === 5);
+
+  /* ---- P5：video provider 产出真实可播放 MP4 ---- */
+  const vp = getProvider("video");
+  const vr = await vp.generate(
+    { nodeId: "v1", nodeKind: "video", prompt: "镜头1", title: "t", params: { mode: "图生视频", duration: 2 }, upstreams: [] },
+    { runId: "r2", onProgress: () => {} },
+  );
+  const vurl = vr.urls?.[0] ?? "";
+  check("P5 video 产物是 /mock-clips/*.mp4", /^\/mock-clips\/[a-f0-9]+\.mp4$/.test(vurl), vurl);
 
   console.log(`\n${failed === 0 ? "全部通过" : "存在失败"}：${passed} 通过 / ${failed} 失败`);
   process.exit(failed === 0 ? 0 : 1);

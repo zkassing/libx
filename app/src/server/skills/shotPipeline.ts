@@ -117,6 +117,7 @@ export function buildVideoNodes(
         y: imgY,
       },
       `${shot.camera}，${shot.duration}秒；${shot.scene}`,
+      { params: { mode: "图生视频", duration: shot.duration } },
     );
     newNodes.push(node);
     newEdges.push(makeEdge(shot.imageNodeId!, node.id));

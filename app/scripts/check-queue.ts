@@ -103,7 +103,7 @@ async function main() {
   check("视频终态 progress=100", vRow2.progress === 100);
   check("视频 cost=135", vRow2.cost === 135);
   const vOut = JSON.parse(vRow2.output!);
-  check("视频产物含基于上游", decodeURIComponent(vOut.urls[0]).includes("基于上游"));
+  check("视频产物是可播放 MP4", /^\/mock-clips\/[a-f0-9]+\.mp4$/.test(vOut.urls[0]), vOut.urls[0]);
 
   // —— 4) 事件序列 ——
   const tSeq = byRun.get(tRun) ?? [];

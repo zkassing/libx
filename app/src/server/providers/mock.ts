@@ -7,6 +7,7 @@ import type {
   GenProvider,
   GenResult,
 } from "./types";
+import { getMockClipUrl } from "./mockClips";
 
 /* ------------------------------------------------------------------ */
 /* Mock 产物生成（离线可用，不依赖任何外部服务）                         */
@@ -130,6 +131,15 @@ function makeProvider(
       if (kind === "text") return buildTextResult(input);
 
       const seed = input.nodeId.slice(-6);
+      const color = NODE_META[input.nodeKind]?.accent ?? "#8b5cf6";
+
+      // video：优先给真实可播放 MP4（P5 顺序连播依赖 onEnded），失败回退 SVG
+      if (input.nodeKind === "video") {
+        const wanted = Number(input.params?.duration) ?? 2;
+        const clipUrl = await getMockClipUrl(color, wanted);
+        if (clipUrl) return { kind: input.nodeKind, urls: [clipUrl] };
+      }
+
       return {
         kind: input.nodeKind,
         urls: [

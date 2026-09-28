@@ -42,3 +42,7 @@ yarn-error.log*
 next-env.d.ts
 .env
 src/generated
+
+# ffmpeg 自动生成的 mock 样片
+/public/mock-clips
+/public/uploads
