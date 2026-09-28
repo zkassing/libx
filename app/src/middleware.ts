@@ -4,25 +4,27 @@ import { NextResponse } from "next/server";
 
 /**
  * 路由保护（T1.3）：
- * - /canvas 必须登录，未登录跳 /login（带上 from）
- * - 已登录还访问 /login，送回画布
- * - 首页与 Auth API 放行
+ * - /project（首页）、/assets、/canvas 必须登录，未登录跳 /login（带上 from）
+ * - 已登录还访问 /login，送回首页 /project
+ * - 首页重定向、Auth API 放行
  */
+const PROTECTED = ["/project", "/assets", "/canvas"];
+
 export default auth((req) => {
   const isLoggedIn = !!req.auth;
   const { pathname } = req.nextUrl;
 
-  // /canvas 与 /canvas/:id 都必须登录
-  if (pathname === "/canvas" || pathname.startsWith("/canvas/")) {
-    if (!isLoggedIn) {
-      const url = new URL("/login", req.nextUrl);
-      url.searchParams.set("from", pathname);
-      return NextResponse.redirect(url);
-    }
+  const needsAuth = PROTECTED.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+  if (needsAuth && !isLoggedIn) {
+    const url = new URL("/login", req.nextUrl);
+    url.searchParams.set("from", pathname);
+    return NextResponse.redirect(url);
   }
 
   if (pathname === "/login" && isLoggedIn) {
-    return NextResponse.redirect(new URL("/canvas", req.nextUrl));
+    return NextResponse.redirect(new URL("/project", req.nextUrl));
   }
 
   return NextResponse.next();

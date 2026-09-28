@@ -2,18 +2,27 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { signOut, useSession } from "next-auth/react";
 import {
-  Boxes,
   FolderKanban,
   Images,
+  Loader2,
+  LogIn,
   LogOut,
   Plus,
   Puzzle,
   Sparkles,
+  type LucideIcon,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
-/** 全局左侧导航（Agent / 项目 / 资产 / 插件），仿 LibTV */
+/** 全局左侧导航（Agent / 项目 / 资产 / 插件 + 账户），仿 LibTV */
 export function GlobalNav({ onNewProject }: { onNewProject: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -60,7 +69,7 @@ export function GlobalNav({ onNewProject }: { onNewProject: () => void }) {
         <NavLink href="#" icon={Puzzle} label="插件与扩展" disabled />
       </div>
 
-      {/* 底部 */}
+      {/* 底部：快速进入画布 + 当前登录账户 */}
       <div className="mt-auto space-y-1.5 border-t border-white/8 pt-4">
         <button
           onClick={() => router.push("/canvas")}
@@ -69,19 +78,78 @@ export function GlobalNav({ onNewProject }: { onNewProject: () => void }) {
           <Sparkles className="h-4 w-4" />
           快速进入画布
         </button>
-        <button
-          onClick={() => router.push("/login")}
-          className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-[13px] text-white/60 transition hover:bg-white/5 hover:text-white"
-        >
-          <LogOut className="h-4 w-4" />
-          退出登录
-        </button>
-        <div className="flex items-center gap-2 px-2.5 pt-1 text-[11px] text-white/30">
-          <Boxes className="h-3.5 w-3.5" />
-          <span>AI 影视与内容创作工作台</span>
-        </div>
+        <AccountMenu />
       </div>
     </nav>
+  );
+}
+
+/** 左下角当前登录账户：头像 + 昵称 + 邮箱，点开可退出登录 */
+function AccountMenu() {
+  const { data: session, status } = useSession();
+  const user = session?.user;
+
+  if (status === "loading") {
+    return (
+      <div className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-[12.5px] text-white/30">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        加载账户…
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Link
+        href="/login"
+        className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-[13px] text-white/60 transition hover:bg-white/5 hover:text-white"
+      >
+        <LogIn className="h-4 w-4" />
+        未登录 · 去登录
+      </Link>
+    );
+  }
+
+  const initial = (user.name ?? user.email ?? "?").slice(0, 1).toUpperCase();
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-white/5"
+          aria-label="账号菜单"
+        >
+          {user.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={user.image}
+              alt={user.name ?? "用户头像"}
+              className="size-7 shrink-0 rounded-full object-cover"
+            />
+          ) : (
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-[12px] font-medium text-white">
+              {initial}
+            </span>
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[12.5px] text-white">
+              {user.name ?? "未命名用户"}
+            </div>
+            <div className="truncate text-[10.5px] text-white/40">{user.email}</div>
+          </div>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="top" className="w-52">
+        <div className="px-2 py-1.5 text-[11px] text-white/35">{user.email}</div>
+        <DropdownMenuItem
+          onSelect={() => signOut({ redirectTo: "/login" })}
+          className="text-red-300 focus:text-red-200"
+        >
+          <LogOut className="size-3.5" />
+          退出登录
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -93,7 +161,7 @@ function NavLink({
   disabled,
 }: {
   href: string;
-  icon: typeof Boxes;
+  icon: LucideIcon;
   label: string;
   active?: boolean;
   disabled?: boolean;

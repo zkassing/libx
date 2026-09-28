@@ -1,12 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { signOut } from "next-auth/react";
 import * as React from "react";
 import {
   Archive,
   ChevronLeft,
   FolderPlus,
   ImageIcon,
+  Loader2,
   Plus,
   Search,
   Trash2,
@@ -26,15 +28,34 @@ export default function ProjectHomePage() {
   const [projects, setProjects] = React.useState<ProjectCard[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [query, setQuery] = React.useState("");
+  const [creating, setCreating] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  /** 会话失效（未登录 / 账号已不存在）：清掉 cookie 再去登录，避免被 middleware 弹回画布卡死 */
+  const gotoLogin = React.useCallback(async () => {
+    await signOut({ redirect: false }).catch(() => {});
+    router.replace("/login?from=/project");
+  }, [router]);
 
   const load = React.useCallback(async () => {
-    const res = await fetch("/api/workflows");
-    if (res.ok) {
+    try {
+      const res = await fetch("/api/workflows");
+      if (res.status === 401) {
+        await gotoLogin();
+        return;
+      }
+      if (!res.ok) {
+        setError(`加载项目失败（${res.status}），请刷新重试`);
+        return;
+      }
       const j = (await res.json()) as { workflows: ProjectCard[] };
       setProjects(j.workflows);
+    } catch {
+      setError("网络异常，加载项目失败");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  }, []);
+  }, [gotoLogin]);
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -42,14 +63,33 @@ export default function ProjectHomePage() {
   }, [load]);
 
   async function createProject() {
-    const res = await fetch("/api/workflows", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "未命名项目" }),
-    });
-    if (res.ok) {
-      const j = (await res.json()) as { workflow: { id: string } };
+    if (creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/workflows", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "未命名项目" }),
+      });
+      if (res.status === 401) {
+        await gotoLogin();
+        return;
+      }
+      if (!res.ok) {
+        setError(`创建项目失败（${res.status}），请重试`);
+        return;
+      }
+      const j = (await res.json()) as { workflow?: { id: string } };
+      if (!j.workflow?.id) {
+        setError("创建项目失败：返回数据异常");
+        return;
+      }
       router.push(`/canvas/${j.workflow.id}`);
+    } catch {
+      setError("网络异常，创建项目失败，请重试");
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -97,6 +137,17 @@ export default function ProjectHomePage() {
         </header>
 
         <div className="flex-1 px-8 py-7">
+          {error && (
+            <div className="mb-5 flex items-center gap-2 rounded-lg border border-[#f85149]/35 bg-[#f85149]/10 px-3.5 py-2.5 text-[12.5px] text-[#ff9c95]">
+              <span className="flex-1">{error}</span>
+              <button
+                onClick={() => router.refresh()}
+                className="rounded border border-[#f85149]/40 px-2 py-0.5 text-[11.5px] transition hover:bg-[#f85149]/15"
+              >
+                刷新
+              </button>
+            </div>
+          )}
           {loading ? (
             <div className="text-[13px] text-white/40">加载中…</div>
           ) : (
@@ -105,10 +156,15 @@ export default function ProjectHomePage() {
               <div>
                 <button
                   onClick={createProject}
-                  className="group flex aspect-[16/10] w-full flex-col items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.02] text-white/40 transition hover:border-[#1677ff]/60 hover:text-[#1677ff]"
+                  disabled={creating}
+                  className="group flex aspect-[16/10] w-full flex-col items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.02] text-white/40 transition hover:border-[#1677ff]/60 hover:text-[#1677ff] disabled:cursor-wait disabled:opacity-60"
                 >
-                  <Plus className="h-6 w-6" />
-                  <span className="text-[13px]">开始创作</span>
+                  {creating ? (
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  ) : (
+                    <Plus className="h-6 w-6" />
+                  )}
+                  <span className="text-[13px]">{creating ? "创建中…" : "开始创作"}</span>
                 </button>
                 <div className="mt-2 truncate px-0.5 text-[13px] text-white/55">创建新的视频项目</div>
               </div>

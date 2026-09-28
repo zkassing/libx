@@ -48,7 +48,9 @@ export default function LoginPage() {
         setError("邮箱或密码不正确");
         return;
       }
-      router.push("/canvas");
+      // 登录后落到首页 /project；若从受保护页面被弹来（middleware 带 from），则回到那一页
+      const from = new URLSearchParams(window.location.search).get("from");
+      router.push(from && from.startsWith("/") ? from : "/project");
       router.refresh();
     } finally {
       setLoading(false);
