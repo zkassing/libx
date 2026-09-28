@@ -8,6 +8,7 @@ import {
   Clock3,
   FolderOpen,
   LayoutGrid,
+  Loader2,
   Minus,
   MousePointer2,
   NotebookPen,
@@ -15,6 +16,7 @@ import {
   Plus,
   Settings2,
   Sparkles,
+  Square,
   Users,
 } from "lucide-react";
 import { useReactFlow, useViewport } from "@xyflow/react";
@@ -46,6 +48,29 @@ export function BottomDock() {
   const runAll = useCanvasStore((s) => s.runAll);
   const autoLayout = useCanvasStore((s) => s.autoLayout);
   const nodeCount = useCanvasStore((s) => s.nodes.length);
+  const workflowId = useCanvasStore((s) => s.workflowId);
+  /** 排队中 + 执行中的节点数（返回原始值，避免每帧新建数组触发重渲染） */
+  const runningCount = useCanvasStore((s) =>
+    s.nodes.reduce(
+      (n, x) =>
+        n + (x.data.status === "running" || x.data.status === "queued" ? 1 : 0),
+      0,
+    ),
+  );
+  const [stopping, setStopping] = React.useState(false);
+
+  /** 停止：取消本画布所有排队/执行中的任务（终态通过 SSE 回写到节点） */
+  async function stopAll() {
+    if (!workflowId || stopping) return;
+    setStopping(true);
+    try {
+      await fetch(`/api/workflows/${workflowId}/runs/cancel`, { method: "POST" });
+    } catch {
+      // 失败就保持原状，用户可再点（不弹错误打断操作）
+    } finally {
+      setStopping(false);
+    }
+  }
   const { snapToGrid, showMiniMap, setSnapToGrid, setShowMiniMap, agentOpen, setAgentOpen } =
     useCanvasPrefs();
   const { selectMode, toggleSelectMode } = useCanvasPrefs();
@@ -348,15 +373,35 @@ export function BottomDock() {
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                onClick={() => runAll()}
-                className="flex size-8 items-center justify-center rounded-full bg-primary text-white transition hover:brightness-110"
-                aria-label="整体执行"
-              >
-                <Bot className="size-4" />
-              </button>
+              {runningCount > 0 ? (
+                <button
+                  onClick={stopAll}
+                  disabled={stopping}
+                  className="flex h-8 items-center gap-1.5 rounded-full bg-[#f85149] px-3 text-[12.5px] font-medium text-white transition hover:brightness-110 disabled:opacity-60"
+                  aria-label="停止生成"
+                >
+                  {stopping ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Square className="size-3.5 fill-current" />
+                  )}
+                  停止（{runningCount}）
+                </button>
+              ) : (
+                <button
+                  onClick={() => runAll()}
+                  className="flex size-8 items-center justify-center rounded-full bg-primary text-white transition hover:brightness-110"
+                  aria-label="整体执行"
+                >
+                  <Bot className="size-4" />
+                </button>
+              )}
             </TooltipTrigger>
-            <TooltipContent>整体执行工作流</TooltipContent>
+            <TooltipContent>
+              {runningCount > 0
+                ? `停止正在生成的 ${runningCount} 个节点`
+                : "整体执行工作流"}
+            </TooltipContent>
           </Tooltip>
         </div>
         </div>

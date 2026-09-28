@@ -12,7 +12,8 @@ export type RunEventType =
   | "progress"
   | "cached"
   | "succeeded"
-  | "failed";
+  | "failed"
+  | "canceled";
 
 export interface RunEvent {
   /** 事件类型 */
@@ -29,7 +30,7 @@ export interface RunEvent {
   output?: unknown;
   /** 是否命中缓存（cached=true 时本次不扣费） */
   cached?: boolean;
-  /** 失败原因（failed 时携带） */
+  /** 失败/取消原因（failed、canceled 时携带） */
   error?: string;
   /** 事件时间戳（ms） */
   at: number;

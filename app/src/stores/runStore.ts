@@ -11,7 +11,14 @@ import type { RunStatus } from "@/types";
 
 /** 与服务端 RunEvent 对齐的前端形状（只挑要用的字段） */
 export interface RunEventPayload {
-  type: "queued" | "started" | "progress" | "cached" | "succeeded" | "failed";
+  type:
+    | "queued"
+    | "started"
+    | "progress"
+    | "cached"
+    | "succeeded"
+    | "failed"
+    | "canceled";
   runId: string;
   nodeId: string;
   workflowId: string;
@@ -58,6 +65,8 @@ function toStatus(type: RunEventPayload["type"]): RunStatus {
       return "succeeded";
     case "failed":
       return "failed";
+    case "canceled":
+      return "canceled";
   }
 }
 
@@ -72,7 +81,8 @@ export const useRunStore = create<RunStore>((set) => ({
       status,
       // 进度：progress/终态事件携带；没有则沿用旧值，起点 0
       progress:
-        e.progress ?? (status === "succeeded" ? 100 : prev?.progress ?? 0),
+        e.progress ??
+        (status === "succeeded" ? 100 : status === "canceled" ? 0 : prev?.progress ?? 0),
       runId: e.runId,
       workflowId: e.workflowId,
       cached: e.cached ?? (status === "succeeded" ? prev?.cached : undefined),
@@ -83,7 +93,7 @@ export const useRunStore = create<RunStore>((set) => ({
           : status === "running" && !prev?.output
             ? undefined
             : prev?.output,
-      error: status === "failed" ? e.error : undefined,
+      error: status === "failed" || status === "canceled" ? e.error : undefined,
     };
 
     set((s) => ({

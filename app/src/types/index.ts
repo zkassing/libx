@@ -2,7 +2,13 @@
 
 export type NodeKind = "text" | "image" | "video" | "audio" | "script";
 
-export type RunStatus = "idle" | "queued" | "running" | "succeeded" | "failed";
+export type RunStatus =
+  | "idle"
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "canceled";
 
 export interface NodeParams {
   model?: string;

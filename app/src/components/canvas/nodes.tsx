@@ -25,6 +25,7 @@ import {
   Plus,
   SlidersHorizontal,
   Sparkles,
+  CircleSlash,
   TriangleAlert,
   Type as TypeIcon,
   Video as VideoIcon,
@@ -101,6 +102,7 @@ function StatusPill({ id, data }: { id: string; data: FlowNodeData }) {
     running: { text: `${data.progress}%`, cls: "text-primary" },
     succeeded: { text: cached ? "已完成 · 命中缓存" : "已完成", cls: "text-emerald-400/85" },
     failed: { text: "失败", cls: "text-destructive" },
+    canceled: { text: "已取消", cls: "text-white/40" },
   } as const;
   const s = map[data.status as keyof typeof map];
   if (!s) return null;
@@ -108,6 +110,7 @@ function StatusPill({ id, data }: { id: string; data: FlowNodeData }) {
     <span className={cn("ml-auto flex items-center gap-1 text-[11px]", s.cls)}>
       {data.status === "running" && <Loader2 className="size-3 animate-spin" />}
       {data.status === "failed" && <TriangleAlert className="size-3" />}
+      {data.status === "canceled" && <CircleSlash className="size-3" />}
       {s.text}
     </span>
   );

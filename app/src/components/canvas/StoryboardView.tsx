@@ -358,7 +358,7 @@ function StageCell({
         <div className="mt-0.5 text-[10.5px]" style={{ color: statusColor(status) }}>
           {statusLabel(status)}
         </div>
-        {status === "failed" && (
+        {(status === "failed" || status === "canceled") && (
           <button onClick={() => onRetry(node.id)} className="mt-1 text-[10.5px] text-[#1677ff] hover:underline">
             重试
           </button>
@@ -411,6 +411,7 @@ function statusColor(s: FlowNodeData["status"]): string {
     case "running": return "#d29922";
     case "queued": return "#d29922";
     case "failed": return "#f85149";
+    case "canceled": return "#8b8b8b";
     default: return "#8b8b8b";
   }
 }
@@ -420,6 +421,7 @@ function statusLabel(s: FlowNodeData["status"]): string {
     case "running": return "生成中…";
     case "queued": return "排队中…";
     case "failed": return "失败";
+    case "canceled": return "已取消";
     default: return "待生成";
   }
 }

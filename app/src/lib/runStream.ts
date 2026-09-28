@@ -31,7 +31,7 @@ export function subscribeRun(runId: string): EventSource {
     }
     useRunStore.getState().apply(data);
     // 终态：服务端会关流，这里也主动关闭并清理
-    if (data.type === "succeeded" || data.type === "failed") close();
+    if (data.type === "succeeded" || data.type === "failed" || data.type === "canceled") close();
   };
 
   es.onerror = () => {
