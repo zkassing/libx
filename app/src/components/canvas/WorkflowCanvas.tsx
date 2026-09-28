@@ -432,6 +432,8 @@ export function WorkflowCanvas() {
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        // 隐藏右下角内置的 "React Flow" 水印
+        proOptions={{ hideAttribution: true }}
         defaultEdgeOptions={{ type: "flow", animated: false }}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
