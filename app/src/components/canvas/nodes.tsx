@@ -1300,20 +1300,33 @@ function Composer({
 /* 节点外壳                                                            */
 /* ------------------------------------------------------------------ */
 
-/** 节点标题：默认显示「类型名 + 序号」，双击进入编辑（回车/失焦保存，Esc 取消） */
+/** 节点标题：默认显示「类型名 + 序号」，双击/右键「重命名」/F2 进入编辑（回车/失焦保存，Esc 取消） */
 function EditableNodeTitle({ id, data }: { id: string; data: FlowNodeData }) {
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
-  const [editing, setEditing] = React.useState(false);
+  const renaming = useCanvasStore((s) => s.renamingNodeId === id);
+  const setRenamingNode = useCanvasStore((s) => s.setRenamingNode);
   const [draft, setDraft] = React.useState("");
   const inputRef = React.useRef<HTMLInputElement>(null);
   const label = displayNodeTitle(data);
 
+  // 进入重命名时用当前标题初始化草稿（渲染期间派生，避免 effect 里同步 setState）
+  const [prevRenaming, setPrevRenaming] = React.useState(false);
+  if (renaming !== prevRenaming) {
+    setPrevRenaming(renaming);
+    if (renaming) setDraft(data.title);
+  }
+
   React.useEffect(() => {
-    if (editing) {
-      inputRef.current?.focus();
-      inputRef.current?.select();
+    if (renaming) {
+      // 等 input 渲染出来再聚焦
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      });
     }
-  }, [editing]);
+  }, [renaming]);
+
+  const close = () => setRenamingNode(null);
 
   const commit = () => {
     const next = draft.trim();
@@ -1323,10 +1336,10 @@ function EditableNodeTitle({ id, data }: { id: string; data: FlowNodeData }) {
     } else if (!next) {
       updateNodeData(id, { title: NODE_META[data.kind].label });
     }
-    setEditing(false);
+    close();
   };
 
-  if (editing) {
+  if (renaming) {
     return (
       <input
         ref={inputRef}
@@ -1336,7 +1349,7 @@ function EditableNodeTitle({ id, data }: { id: string; data: FlowNodeData }) {
         onKeyDown={(e) => {
           e.stopPropagation();
           if (e.key === "Enter") commit();
-          if (e.key === "Escape") setEditing(false);
+          if (e.key === "Escape") close();
         }}
         onPointerDown={(e) => e.stopPropagation()}
         className="nodrag h-5 w-36 rounded border border-white/25 bg-black/60 px-1.5 text-[12px] text-white/90 outline-none"
@@ -1349,8 +1362,7 @@ function EditableNodeTitle({ id, data }: { id: string; data: FlowNodeData }) {
       title="双击改名"
       onDoubleClick={(e) => {
         e.stopPropagation();
-        setDraft(data.title);
-        setEditing(true);
+        setRenamingNode(id);
       }}
     >
       {label}
@@ -1549,10 +1561,12 @@ function BaseNode({ id, data, selected }: NodeProps<FlowNode>) {
       <div aria-hidden className="absolute -inset-x-9 -inset-y-2" />
 
       {/* 节点标签：高度锁 NODE_LABEL_H，避免图标撑开后卡片高度被挤掉。
-          双击可改名（自定义后不再带序号；清空则回退默认名） */}
+          双击可改名（自定义后不再带序号；清空则回退默认名）。
+          relative 把自己抬到「端口感应区」absolute 层之上，否则标签行
+          下半部被感应区盖住，真实点击/双击全被它截走（合成事件测不出来） */}
       <div
         style={{ height: NODE_LABEL_H }}
-        className="flex shrink-0 items-center gap-1.5 text-[12px] text-white/45"
+        className="relative flex shrink-0 items-center gap-1.5 text-[12px] text-white/45"
       >
         <Icon className="size-3" strokeWidth={1.8} />
         <EditableNodeTitle id={id} data={data} />

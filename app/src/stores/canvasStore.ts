@@ -113,6 +113,8 @@ export interface CanvasState {
   nodes: Node<FlowNodeData>[];
   edges: Edge[];
   selectedNodeId: string | null;
+  /** 正在重命名的节点（右键「重命名」/ F2 / 双击标题触发，不持久化） */
+  renamingNodeId: string | null;
   /** 正在从哪个节点拉连线（用于目标卡片的 3D 反馈） */
   connectingFrom: string | null;
   /** 最近一次连线被拒的原因（画布上浮层提示，不持久化） */
@@ -163,6 +165,7 @@ export interface CanvasState {
   removeNode: (id: string) => void;
   duplicateNode: (id: string) => void;
   setSelected: (id: string | null) => void;
+  setRenamingNode: (id: string | null) => void;
   setConnectingFrom: (id: string | null) => void;
   setConnectionError: (msg: string | null) => void;
 
@@ -207,6 +210,7 @@ export const useCanvasStore = create<CanvasState>()(
       nodes: [],
       edges: [],
       selectedNodeId: null,
+      renamingNodeId: null,
       connectingFrom: null,
       connectionError: null,
       hydrated: false,
@@ -434,6 +438,7 @@ export const useCanvasStore = create<CanvasState>()(
       },
 
       setSelected: (id) => set({ selectedNodeId: id }),
+      setRenamingNode: (id) => set({ renamingNodeId: id }),
       setConnectingFrom: (id) => set({ connectingFrom: id }),
       setConnectionError: (msg) => set({ connectionError: msg }),
 

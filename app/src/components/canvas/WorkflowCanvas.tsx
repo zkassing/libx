@@ -14,7 +14,7 @@ import {
   type FinalConnectionState,
   type Node,
 } from "@xyflow/react";
-import { Ban, Copy, CopyPlus, FolderDown, Group as GroupIcon, ImageDown, Star, Trash2, Ungroup, Upload } from "lucide-react";
+import { Ban, Copy, CopyPlus, FolderDown, Group as GroupIcon, ImageDown, PenLine, Star, Trash2, Ungroup, Upload } from "lucide-react";
 import { nodeTypes, NODE_ICONS } from "@/components/canvas/nodes";
 import { edgeTypes } from "@/components/canvas/FlowEdge";
 import { NodeActionsBar } from "@/components/canvas/NodeActionsBar";
@@ -97,6 +97,7 @@ function ContextMenu({
   const groupSelected = useCanvasStore((s) => s.groupSelected);
   const ungroupSelected = useCanvasStore((s) => s.ungroupSelected);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const setRenamingNode = useCanvasStore((s) => s.setRenamingNode);
   const node = useCanvasStore((s) =>
     menu.nodeId ? s.nodes.find((n) => n.id === menu.nodeId) : undefined,
   );
@@ -162,6 +163,7 @@ function ContextMenu({
     menu.nodeId
       ? [
           ...outputItems,
+          { label: "重命名 (F2)", icon: PenLine, run: () => setRenamingNode(menu.nodeId!) },
           { label: "复制节点", icon: Copy, run: () => duplicateNode(menu.nodeId!) },
           { label: "创建副本", icon: CopyPlus, run: () => duplicateNode(menu.nodeId!) },
           { label: "打组 (⌘G)", icon: GroupIcon, run: () => groupSelected() },
@@ -318,6 +320,18 @@ export function WorkflowCanvas() {
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
+
+      // F2：重命名选中节点（无修饰键，主流画布约定）
+      if (e.key === "F2") {
+        if (isTextEntry(e.target)) return;
+        const id = useCanvasStore.getState().selectedNodeId;
+        if (id) {
+          e.preventDefault();
+          useCanvasStore.getState().setRenamingNode(id);
+        }
+        return;
+      }
+
       if (!meta) return;
       const k = e.key.toLowerCase();
 
