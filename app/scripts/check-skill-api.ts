@@ -23,7 +23,7 @@ function check(name: string, cond: boolean, extra = "") {
   console.log(`${cond ? "PASS" : "FAIL"}  ${name}${extra ? `  → ${extra}` : ""}`);
 }
 
-const BASE = "http://localhost:3000";
+const BASE = "http://localhost:8620";
 
 async function login(email: string, password: string) {
   const jar = new Map<string, string>();

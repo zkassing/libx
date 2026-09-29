@@ -47,7 +47,7 @@ check("灵感注入首个节点", inst2.nodes[0].data.prompt.includes("云端城
 check("灵感只注入首个", !inst2.nodes[1].data.prompt.includes("云端城市"));
 
 /* ---------- HTTP start ---------- */
-const BASE = "http://localhost:3000";
+const BASE = "http://localhost:8620";
 
 async function login(email: string, password: string) {
   const jar = new Map<string, string>();

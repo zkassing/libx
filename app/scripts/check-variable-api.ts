@@ -21,7 +21,7 @@ function check(name: string, cond: boolean, extra = "") {
   console.log(`${cond ? "PASS" : "FAIL"}  ${name}${extra ? `  → ${extra}` : ""}`);
 }
 
-const BASE = "http://localhost:3000";
+const BASE = "http://localhost:8620";
 
 /** NextAuth credentials 登录，返回带 cookie 的 fetch 包装器 */
 async function login(email: string, password: string) {

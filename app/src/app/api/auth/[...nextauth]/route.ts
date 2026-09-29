@@ -5,7 +5,7 @@ import { handlers } from "@/auth";
 /* Auth.js 的动态 origin 修正                                            */
 /* ------------------------------------------------------------------ */
 /* `next dev` 默认 hostname 是 localhost，Next.js 在 route handler 里把      */
-/* request.url 固定成 http://localhost:3000，而不是请求头里的 Host。        */
+/* request.url 固定成 http://localhost:8620，而不是请求头里的 Host。        */
 /* Auth.js 用 request.url 当 base URL，导致：                             */
 /*   - 通过局域网 IP（或 .local）访问时，登录后被 302 弹回 localhost；       */
 /*   - cookie 的 callback-url 也被写成 localhost。                        */
