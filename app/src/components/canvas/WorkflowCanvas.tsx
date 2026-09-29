@@ -14,9 +14,10 @@ import {
   type FinalConnectionState,
   type Node,
 } from "@xyflow/react";
-import { Ban, Copy, Group as GroupIcon, Trash2, Ungroup } from "lucide-react";
+import { Ban, Copy, CopyPlus, FolderDown, Group as GroupIcon, ImageDown, Star, Trash2, Ungroup } from "lucide-react";
 import { nodeTypes, NODE_ICONS } from "@/components/canvas/nodes";
 import { edgeTypes } from "@/components/canvas/FlowEdge";
+import { NodeActionsBar } from "@/components/canvas/NodeActionsBar";
 import { NODE_META, NODE_KINDS } from "@/lib/nodeTypes";
 import { checkConnection } from "@/lib/connections";
 import { nextNodePosition } from "@/lib/placement";
@@ -90,11 +91,58 @@ function ContextMenu({
   const removeNode = useCanvasStore((s) => s.removeNode);
   const groupSelected = useCanvasStore((s) => s.groupSelected);
   const ungroupSelected = useCanvasStore((s) => s.ungroupSelected);
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const node = useCanvasStore((s) =>
+    menu.nodeId ? s.nodes.find((n) => n.id === menu.nodeId) : undefined,
+  );
+  const nodeData = node?.data as FlowNodeData | undefined;
+  const outputUrl =
+    nodeData?.status === "succeeded" ? nodeData.output?.urls?.[0] : undefined;
+
+  /** 产物写入系统剪贴板（对齐 LibTV「复制图片」） */
+  const copyImage = async () => {
+    if (!outputUrl) return;
+    try {
+      const blob = await (await fetch(outputUrl)).blob();
+      await navigator.clipboard.write([
+        new ClipboardItem({ [blob.type || "image/png"]: blob }),
+      ]);
+    } catch {
+      /* 剪贴板权限被拒绝时静默 */
+    }
+  };
+
+  /** 保存到我的资产（LibTV 右键第一项） */
+  const saveToAssets = async () => {
+    if (!outputUrl || !nodeData) return;
+    await fetch("/api/assets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: nodeData.kind === "script" ? "text" : nodeData.kind,
+        title: `${nodeData.title}${nodeData.index ? ` ${nodeData.index}` : ""} 的产物`,
+        url: outputUrl,
+        ...(nodeData.rating ? { rating: nodeData.rating } : {}),
+      }),
+    }).catch(() => {});
+  };
+
+  const outputItems =
+    menu.nodeId && outputUrl && nodeData
+      ? [
+          { label: "保存到我的资产", icon: FolderDown, run: () => void saveToAssets() },
+          ...(nodeData.kind === "image"
+            ? [{ label: "复制图片", icon: ImageDown, run: () => void copyImage() }]
+            : []),
+        ]
+      : [];
 
   const items: { label: string; icon: React.ElementType; run?: () => void }[] =
     menu.nodeId
       ? [
+          ...outputItems,
           { label: "复制节点", icon: Copy, run: () => duplicateNode(menu.nodeId!) },
+          { label: "创建副本", icon: CopyPlus, run: () => duplicateNode(menu.nodeId!) },
           { label: "打组 (⌘G)", icon: GroupIcon, run: () => groupSelected() },
           { label: "解组", icon: Ungroup, run: () => ungroupSelected() },
           { label: "删除节点", icon: Trash2, run: () => removeNode(menu.nodeId!) },
@@ -116,6 +164,8 @@ function ContextMenu({
           },
         }));
 
+  const rating = nodeData?.rating ?? 0;
+
   return (
     <>
       <div
@@ -127,6 +177,31 @@ function ContextMenu({
         className="fixed z-50 max-h-[70vh] min-w-44 overflow-auto rounded-xl border border-white/10 bg-[#1b1b1e] p-1 shadow-2xl"
         style={{ left: menu.x, top: menu.y }}
       >
+        {/* 评级（对齐 LibTV：产物节点右键第一行五角星） */}
+        {menu.nodeId && outputUrl && (
+          <div className="flex items-center gap-1 px-2.5 py-1.5">
+            <span className="mr-1 text-[12.5px] text-white/55">评级</span>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                onClick={() => {
+                  updateNodeData(menu.nodeId!, { rating: n === rating ? 0 : n });
+                  onClose();
+                }}
+                className="p-0.5"
+              >
+                <Star
+                  className={cn(
+                    "size-3.5 transition",
+                    n <= rating
+                      ? "fill-amber-400 text-amber-400"
+                      : "text-white/30 hover:text-amber-300",
+                  )}
+                />
+              </button>
+            ))}
+          </div>
+        )}
         {items.map((it) => (
           <button
             key={it.label}
@@ -240,24 +315,67 @@ export function WorkflowCanvas() {
         e.preventDefault();
         if (e.shiftKey) ungroupSelected();
         else groupSelected();
+        return;
+      }
+      // ⌘Enter：运行选中节点（对齐 LibTV「生成」）
+      if (e.key === "Enter") {
+        const id = useCanvasStore.getState().selectedNodeId;
+        if (id) {
+          e.preventDefault();
+          void useCanvasStore.getState().runNode(id);
+        }
+        return;
+      }
+      // ⌘D：创建副本（对齐 LibTV；覆盖浏览器收藏）
+      if (k === "d") {
+        const id = useCanvasStore.getState().selectedNodeId;
+        if (id) {
+          e.preventDefault();
+          useCanvasStore.getState().duplicateNode(id);
+        }
+        return;
+      }
+      // ⌘0：适应画布（对齐 LibTV）
+      if (k === "0") {
+        e.preventDefault();
+        void rfInstance.fitView({ padding: 0.2, duration: 300 });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [groupSelected, ungroupSelected, undo, redo]);
+  }, [groupSelected, ungroupSelected, undo, redo, rfInstance]);
 
-  /** V / P：在「选择模式（框选）」与「平移模式」之间切换 */
+  /** V / P：在「选择模式（框选）」与「平移模式」之间切换；Tab：新建节点菜单；⌥⇧F：整理画布 */
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.metaKey || e.ctrlKey) return;
       if (isTextEntry(e.target)) return;
+      // ⌥⇧F：一键整理（对齐 LibTV）
+      if (e.altKey && e.shiftKey && e.code === "KeyF") {
+        e.preventDefault();
+        useCanvasStore.getState().autoLayout();
+        return;
+      }
+      if (e.altKey) return;
+      // Tab：在画布中央唤出新建节点菜单（对齐 LibTV）
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const cx = window.innerWidth / 2;
+        const cy = window.innerHeight / 2;
+        setMenu({
+          x: cx,
+          y: cy,
+          flow: screenToFlowPosition({ x: cx, y: cy }),
+        });
+        return;
+      }
       const k = e.key.toLowerCase();
       if (k === "v") useCanvasPrefs.getState().setSelectMode(true);
       else if (k === "p") useCanvasPrefs.getState().setSelectMode(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [screenToFlowPosition]);
 
   const addAtCenter = React.useCallback(
     (kind: NodeKind) => {
@@ -535,6 +653,8 @@ export function WorkflowCanvas() {
 
       {nodes.length === 0 && <EmptyState onPick={addAtCenter} />}
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+      {/* 选中带产物的图片节点时：顶部工具条（高清派生 / 下载 / 全屏） */}
+      <NodeActionsBar />
 
       {/* 连线被拒的提示 */}
       {connectionError && (

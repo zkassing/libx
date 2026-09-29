@@ -173,7 +173,7 @@ export const arkTextProvider: GenProvider = {
 
 /* ------------------------------ 图片 ------------------------------ */
 
-/** 画布上的比例 → ARK 像素尺寸（ARK 只收像素串或 "2K"，像素串更可控） */
+/** 画布上的比例 → ARK 像素尺寸（2K 基准；ARK 只收像素串或 "2K"，像素串更可控） */
 const RATIO_SIZE: Record<string, string> = {
   "16:9": "2048x1152",
   "9:16": "1152x2048",
@@ -181,8 +181,35 @@ const RATIO_SIZE: Record<string, string> = {
   "4:3": "2048x1536",
   "3:4": "1536x2048",
   "21:9": "2048x878",
+  "9:21": "878x2048",
   "3:2": "2048x1365",
   "2:3": "1365x2048",
+  "1:2": "1152x2304",
+  "2:1": "2304x1152",
+  "5:4": "2048x1638",
+  "4:5": "1638x2048",
+};
+
+/** 清晰度档位 → 尺寸缩放（1K 省算力草稿、2K 默认、4K 成片；边长钳制在 [512, 4096]） */
+function scaleSize(size: string, resolution?: string): string {
+  const m = /^(\d+)x(\d+)$/.exec(size);
+  if (!m) return size;
+  const factor = resolution === "1K" ? 0.5 : resolution === "4K" ? 2 : 1;
+  if (factor === 1) return size;
+  const clamp = (v: number) => Math.min(4096, Math.max(512, Math.round(v / 2) * 2));
+  return `${clamp(Number(m[1]) * factor)}x${clamp(Number(m[2]) * factor)}`;
+}
+
+/** 画质档位 → 提示词后缀（没有独立 API 字段，用提示词工程真实影响产出） */
+const QUALITY_SUFFIX: Record<string, string> = {
+  高画质: "，高清画质，细节丰富",
+  超高画质: "，超高清画质，细节极为丰富，锐利干净",
+  极致画质: "，极致画质，大师级细节与光影，纤毫毕现",
+};
+
+const BG_SUFFIX: Record<string, string> = {
+  保留背景: "保持原图片背景不变",
+  透明背景: "主体孤立呈现，干净纯色背景，贴纸风格，便于后期抠图",
 };
 
 export const arkImageProvider: GenProvider = {
@@ -196,9 +223,19 @@ export const arkImageProvider: GenProvider = {
     const count = Math.min(4, Math.max(1, Number(input.params?.count) || 1));
 
     const digest = upstreamDigest(input);
-    const base = [input.prompt || input.title, digest ? `参考上下文：\n${digest}` : ""]
-      .filter(Boolean)
-      .join("\n\n");
+    // 画质 / 背景参数 → 提示词后缀（对齐 LibTV 参数弹层的真实语义）
+    const quality = String(input.params?.quality ?? "");
+    const background = String(input.params?.background ?? "");
+    const suffix =
+      (QUALITY_SUFFIX[quality] ?? "") +
+      (background && background !== "自动" && BG_SUFFIX[background]
+        ? `，${BG_SUFFIX[background]}`
+        : "");
+    const base =
+      [input.prompt || input.title, digest ? `参考上下文：\n${digest}` : ""]
+        .filter(Boolean)
+        .join("\n\n") + suffix;
+    const resolution = String(input.params?.resolution ?? "2K");
 
     const all: string[] = [];
     for (let i = 0; i < count; i += 1) {
@@ -208,7 +245,7 @@ export const arkImageProvider: GenProvider = {
         count > 1 ? `${base}\n\n（第 ${i + 1} 张，共 ${count} 张，构图与视角需明显不同）` : base;
 
       const urls = await arkImage(model, prompt, {
-        size: RATIO_SIZE[ratio] ?? RATIO_SIZE["16:9"],
+        size: scaleSize(RATIO_SIZE[ratio] ?? RATIO_SIZE["16:9"], resolution),
         // `@引用` 的参考图（被引用节点产物 / 标记图 / 角色参考图）→ 图生图
         referenceImages: input.referenceImages,
         signal: ctx.signal,

@@ -16,6 +16,9 @@ import {
   Crosshair,
   Download,
   Expand,
+  Hd as HdIcon,
+  Star,
+  Upload,
   Image as ImageIcon,
   Infinity as InfinityIcon,
   Layers,
@@ -60,11 +63,12 @@ import {
   MarkPopover,
   MarkingDialog,
   PresetPopover,
+  ImageParamsPopover,
   useMarkSources,
   type CharacterDto,
   type MarkSource,
 } from "@/components/canvas/ToolPopovers";
-import { CAMERA_PRESETS, EFFECT_PRESETS } from "@/lib/toolPresets";
+import { CAMERA_PRESETS, EFFECT_PRESETS, STYLE_PRESETS } from "@/lib/toolPresets";
 import { OutputPreview } from "@/components/canvas/OutputPreview";
 import { Button } from "@/components/ui/button";
 import {
@@ -89,6 +93,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export const NODE_ICONS: Record<NodeKind, React.ElementType> = {
@@ -139,10 +144,18 @@ function StatusPill({ id, data }: { id: string; data: FlowNodeData }) {
 /* 节点内容区                                                          */
 /* ------------------------------------------------------------------ */
 
-/** 空节点时的 "尝试" 建议（LibTV 里靠左但留出内边距） */
-function SuggestionList({ kind }: { kind: NodeKind }) {
+/** 空节点时的 "尝试" 建议（LibTV 里靠左但留出内边距）
+ *  图片节点的两条是动作入口（图生图/图片高清→上传图片），其余纯展示 */
+function SuggestionList({
+  kind,
+  onPick,
+}: {
+  kind: NodeKind;
+  onPick?: (s: string) => void;
+}) {
   const meta = NODE_META[kind];
-  const icons = [InfinityIcon, Layers, Sparkles];
+  const icons =
+    kind === "image" ? [Upload, HdIcon] : [InfinityIcon, Layers, Sparkles];
   if (!meta.suggestions?.length) return null;
   return (
     <div className="w-full px-6 text-left">
@@ -150,14 +163,21 @@ function SuggestionList({ kind }: { kind: NodeKind }) {
       <div className="flex flex-col gap-2">
         {meta.suggestions.map((s, i) => {
           const Icon = icons[i % icons.length];
+          const clickable = kind === "image" && !!onPick;
           return (
-            <div
+            <button
               key={s}
-              className="flex items-center gap-2.5 text-[12.5px] text-white/60"
+              type="button"
+              disabled={!clickable}
+              onClick={clickable ? () => onPick(s) : undefined}
+              className={cn(
+                "flex items-center gap-2.5 text-left text-[12.5px] text-white/60",
+                clickable && "cursor-pointer transition hover:text-white/90",
+              )}
             >
               <Icon className="size-3.5 shrink-0 text-white/45" />
               {s}
-            </div>
+            </button>
           );
         })}
       </div>
@@ -344,15 +364,62 @@ function ProgressRing({ progress, queued }: { progress: number; queued: boolean 
   );
 }
 
-function NodeBody({ data }: { data: FlowNodeData }) {
+function NodeBody({ id, data }: { id: string; data: FlowNodeData }) {
   const { kind, output, status } = data;
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const updateNodeParams = useCanvasStore((s) => s.updateNodeParams);
+  const fileRef = React.useRef<HTMLInputElement>(null);
+  const uploadActionRef = React.useRef<string>("图生图");
+  const [uploading, setUploading] = React.useState(false);
+
+  /** 空态「尝试」动作：上传本地图 → 变为带图节点（图生图模式 / 高清放大预设） */
+  const handleUploadFile = async (file: File) => {
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/assets/upload", { method: "POST", body: form });
+      const j = await res.json().catch(() => ({}));
+      const url = j?.asset?.url as string | undefined;
+      if (!res.ok || !url) throw new Error(j?.error ?? "上传失败");
+      const hd = uploadActionRef.current === "图片高清";
+      updateNodeData(id, {
+        status: "succeeded",
+        output: { kind: "image", urls: [url] },
+        ...(hd ? { prompt: "高清放大，保持画面内容、构图、色彩完全不变" } : {}),
+      });
+      updateNodeParams(id, {
+        mode: "图生图",
+        ...(hd ? { resolution: "4K", quality: "高画质" } : {}),
+      });
+    } catch {
+      /* 静默：上传失败保持空态 */
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const pickUpload = (action: string) => {
+    uploadActionRef.current = action;
+    fileRef.current?.click();
+  };
 
   if (status === "running" || status === "queued") {
     return <ProgressRing progress={data.progress} queued={status === "queued"} />;
   }
 
   if (output?.text || output?.urls?.length) {
-    return <OutputPreview output={output} marks={data.marks} />;
+    return (
+      <OutputPreview
+        output={output}
+        marks={data.marks}
+        onImageSize={(s) => {
+          if (data.outputSize?.w !== s.w || data.outputSize?.h !== s.h) {
+            updateNodeData(id, { outputSize: s });
+          }
+        }}
+      />
+    );
   }
 
   if (kind === "video" || kind === "image" || kind === "audio") {
@@ -363,7 +430,25 @@ function NodeBody({ data }: { data: FlowNodeData }) {
         )}
         {kind === "image" && <ImageIcon className="size-10" strokeWidth={1.4} />}
         {kind === "audio" && <AudioBars />}
-        <SuggestionList kind={kind} />
+        {uploading ? (
+          <div className="flex items-center gap-2 text-[12px] text-white/50">
+            <Loader2 className="size-3.5 animate-spin" /> 上传中…
+          </div>
+        ) : (
+          <SuggestionList kind={kind} onPick={kind === "image" ? pickUpload : undefined} />
+        )}
+        {/* 空态上传入口（图生图 / 图片高清） */}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void handleUploadFile(f);
+            e.target.value = "";
+          }}
+        />
       </div>
     );
   }
@@ -434,6 +519,38 @@ function ChipSelect({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** 图片节点合并参数 chip（LibTV 实测：「16:9 · 标准画质 · 2K · 1张」单按钮 + 宫格弹层） */
+function MergedImageParams({
+  id,
+  params,
+}: {
+  id: string;
+  params: import("@/types").NodeParams;
+}) {
+  const updateNodeParams = useCanvasStore((s) => s.updateNodeParams);
+  const [open, setOpen] = React.useState(false);
+  const label = `${params.aspectRatio ?? "16:9"} · ${params.quality ?? "标准画质"} · ${params.resolution ?? "2K"} · ${params.count ?? 1}张`;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-white/70 transition hover:bg-white/8 hover:text-white">
+          <span className="max-w-[220px] truncate">{label}</span>
+          <ChevronDown className={cn("size-3 opacity-60 transition-transform", open && "rotate-180")} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-auto border-0 bg-transparent p-0 shadow-none"
+      >
+        <ImageParamsPopover
+          params={params}
+          onChange={(patch) => updateNodeParams(id, patch)}
+        />
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -829,6 +946,18 @@ function Composer({
         />
       );
     }
+    if (tool === "风格") {
+      return (
+        <PresetPopover
+          groups={STYLE_PRESETS}
+          onPick={(item) => {
+            mention.insertAtCaret(`${item}，`);
+            setOpenTool(null);
+          }}
+          className={cls}
+        />
+      );
+    }
     if (tool === "角色库") {
       return (
         <CharacterPicker
@@ -863,10 +992,10 @@ function Composer({
   // 该节点种类下真正适用的参数（对齐 LibTV 字段清单 / PRD §13.2）。
   // 文本只有模型；图片=模型·模式·比例·数量；视频=模型·模式·比例·分辨率·时长·数量；
   // 音频=模型·模式·时长·数量；脚本=模型·模式。
-  const showRatio = data.kind === "image" || data.kind === "video";
+  const showRatio = data.kind === "video"; // 图片比例并入合并参数 chip
   const showResolution = data.kind === "video";
   const showDuration = data.kind === "video" || data.kind === "audio";
-  const showCount = data.kind === "image" || data.kind === "video" || data.kind === "audio";
+  const showCount = data.kind === "video" || data.kind === "audio"; // 图片数量并入合并参数 chip
 
   return (
     <div
@@ -935,7 +1064,12 @@ function Composer({
           options={meta.models}
           onChange={(v) => updateNodeParams(id, { model: v })}
         />
-        {meta.modes && (
+        {/* 图片节点：LibTV 实测是「16:9 · 标准画质 · 2K · 1张」一个合并 chip，
+            点开是画质/清晰度/背景/比例/数量的宫格弹层 */}
+        {data.kind === "image" && (
+          <MergedImageParams id={id} params={p} />
+        )}
+        {meta.modes && data.kind !== "image" && (
           <ChipSelect
             value={p.mode}
             options={meta.modes}
@@ -1274,6 +1408,20 @@ function BaseNode({ id, data, selected }: NodeProps<FlowNode>) {
           {data.index ? ` ${data.index}` : ""}
         </span>
         <StatusPill id={id} data={data} />
+        {/* 评级星标（右键菜单「评级」设置） */}
+        {!!data.rating && (
+          <span className="flex shrink-0 items-center gap-px">
+            {Array.from({ length: data.rating }).map((_, i) => (
+              <Star key={i} className="size-2.5 fill-amber-400 text-amber-400" />
+            ))}
+          </span>
+        )}
+        {/* 产物像素尺寸（LibTV：标题行右侧 2048 × 1152） */}
+        {data.outputSize && (
+          <span className="ml-auto shrink-0 font-mono text-[10.5px] text-white/30">
+            {data.outputSize.w} × {data.outputSize.h}
+          </span>
+        )}
       </div>
 
       {/* 卡片 */}
@@ -1298,7 +1446,7 @@ function BaseNode({ id, data, selected }: NodeProps<FlowNode>) {
         }}
       >
         <div className="h-full w-full overflow-hidden rounded-[11px]">
-          <NodeBody data={data} />
+          <NodeBody id={id} data={data} />
         </div>
         <Handle
           type="target"

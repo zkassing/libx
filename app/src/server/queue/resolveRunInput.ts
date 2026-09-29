@@ -120,11 +120,22 @@ export async function resolveRefs(
 ): Promise<ResolvedRefs> {
   const refs = nodeData.refs ?? [];
   const out: ResolvedRefs = { upstreams: [], referenceImages: [] };
-  if (!refs.length) return out;
 
   const pushImage = (url?: string | null) => {
     if (url && !out.referenceImages.includes(url)) out.referenceImages.push(url);
   };
+
+  // 图生图自引用（对齐 LibTV：上传图片进节点 + 输入指令 = 编辑当前图）：
+  // 图片节点在「图生图」模式下，把节点当前产物图作为编辑底图。
+  if (
+    nodeData.kind === "image" &&
+    nodeData.params?.mode === "图生图" &&
+    nodeData.status === "succeeded"
+  ) {
+    for (const u of nodeData.output?.urls ?? []) pushImage(u);
+  }
+
+  if (!refs.length) return out;
 
   // 节点 / 素材类引用：批量取节点行（asset: 前缀是「上游节点的产物」写法）
   const nodeRefIds = refs

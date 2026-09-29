@@ -28,6 +28,8 @@ export const NODE_META: Record<NodeKind, NodeMeta> = {
     models: ["Doubao Seed 2.1 Pro", "DeepSeek V4 Pro", "GLM 5.2"],
     // 对齐 LibTV 实测的文本节点「尝试」建议
     suggestions: ["自己编写内容", "文生视频", "图片反推提示词", "文字生音乐"],
+    // 文本节点工具条只保留 参考/标记
+    tools: ["参考", "标记"],
     outputLabel: "文本",
     placeholder: "写下你想讲的故事、场景或角色设定，@引用素材",
   },
@@ -39,12 +41,17 @@ export const NODE_META: Record<NodeKind, NodeMeta> = {
       model: "Seedream 5.0 Pro",
       mode: "文生图",
       aspectRatio: "16:9",
+      resolution: "2K",
+      quality: "标准画质",
+      background: "自动",
       count: 1,
     },
     models: ["Seedream 5.0 Pro", "Seedream 4.0"],
     modes: ["文生图", "图生图", "参考图"],
-    suggestions: ["电影级光影", "写实人物特写", "概念场景设定"],
-    tools: ["参考", "标记", "特效", "角色库"],
+    // 对齐 LibTV 实测：图片节点空态「尝试」是动作入口
+    suggestions: ["图生图", "图片高清"],
+    // 对齐 LibTV 实测：图片节点工具条 = 参考/标记/风格
+    tools: ["参考", "标记", "风格"],
     outputLabel: "图片",
     placeholder: "描述你想生成的画面内容，@引用素材",
   },
@@ -94,6 +101,17 @@ export const NODE_META: Record<NodeKind, NodeMeta> = {
 
 export const NODE_KINDS = Object.keys(NODE_META) as NodeKind[];
 
-export const ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4"];
+/* 对齐 LibTV 实测：13 种比例（带图标宫格选择） */
+export const ASPECT_RATIOS = [
+  "1:1", "1:2", "2:1", "9:16", "16:9",
+  "3:4", "4:3", "3:2", "2:3", "5:4",
+  "4:5", "21:9", "9:21",
+];
 export const RESOLUTIONS = ["480P", "720P", "1080P"];
+/** 图片清晰度（LibTV 参数弹层） */
+export const IMAGE_RESOLUTIONS = ["1K", "2K", "4K"];
+/** 画质档位（LibTV 参数弹层） */
+export const IMAGE_QUALITIES = ["低画质", "标准画质", "高画质", "超高画质", "极致画质"];
+/** 背景处理（LibTV 参数弹层） */
+export const IMAGE_BACKGROUNDS = ["自动", "保留背景", "透明背景"];
 export const DURATIONS = [3, 5, 10, 15];

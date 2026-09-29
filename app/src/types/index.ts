@@ -16,6 +16,10 @@ export interface NodeParams {
   mode?: string;
   aspectRatio?: string;
   resolution?: string;
+  /** 画质档位（LibTV 图片参数：低/标准/高/超高/极致） */
+  quality?: string;
+  /** 背景处理（LibTV 图片参数：自动 / 保留背景 / 透明背景） */
+  background?: string;
   duration?: number;
   count?: number;
   [key: string]: unknown;
@@ -128,6 +132,10 @@ export interface FlowNodeData {
   marks?: NodeMark[];
   /** 用户自定义卡片尺寸（拖右下角调整；目前仅文本节点暴露手柄） */
   size?: { w: number; h: number };
+  /** 产物的像素尺寸（图片加载后回填，用于节点标题行右侧展示 2048 × 1152） */
+  outputSize?: { w: number; h: number };
+  /** 评级 1-5 星（LibTV 右键菜单「评级」） */
+  rating?: number;
   teaching?: TeachingInfo;
   /** 打组后由 group 节点使用 */
   collapsed?: boolean;

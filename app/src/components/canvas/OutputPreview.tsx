@@ -216,11 +216,13 @@ function MediaInner({
   kind,
   large,
   marks,
+  onImageSize,
 }: {
   url: string;
   kind: NodeOutput["kind"];
   large?: boolean;
   marks?: NodeMark[];
+  onImageSize?: (s: { w: number; h: number }) => void;
 }) {
   // SVG 占位产物（Mock）：图片/视频统一当图显示，视频叠一个播放钮
   const asImage = isImageUrl(url) || (kind === "video" && url.startsWith("data:image"));
@@ -248,7 +250,21 @@ function MediaInner({
     return (
       <div className="relative h-full w-full bg-black/40">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={url} alt="产物" className="h-full w-full object-contain" />
+        <img
+          src={url}
+          alt="产物"
+          className="h-full w-full object-contain"
+          onLoad={(e) => {
+            const img = e.currentTarget;
+            if (img.naturalWidth && onImageSize) {
+              onImageSize({ w: img.naturalWidth, h: img.naturalHeight });
+            }
+          }}
+        />
+        {/* AI 生成角标（对齐 LibTV） */}
+        <span className="pointer-events-none absolute top-1.5 left-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white/70 backdrop-blur">
+          AI生成
+        </span>
         {/* 区域标记框（LibTV 标记）：实测图片绘制框后按归一化矩形叠放 */}
         <MarkOverlay url={url} marks={marks} />
         {kind === "video" && !large && (
@@ -271,11 +287,14 @@ export function OutputPreview({
   output,
   marks,
   className,
+  onImageSize,
 }: {
   output: NodeOutput;
   /** 图片节点产物上的区域标记（LibTV 标记） */
   marks?: NodeMark[];
   className?: string;
+  /** 图片加载后回传像素尺寸（节点标题行展示 2048 × 1152） */
+  onImageSize?: (s: { w: number; h: number }) => void;
 }) {
   const [open, setOpen] = React.useState(false);
 
@@ -293,12 +312,22 @@ export function OutputPreview({
           </pre>
         ))}
 
-      {/* 媒体产物 */}
-      {output.urls?.length && (
-        <div className="h-full w-full">
-          <MediaInner url={output.urls[0]} kind={output.kind} marks={marks} />
-        </div>
-      )}
+      {/* 媒体产物：多张时宫格展示（LibTV 生成 2/4 张为宫格） */}
+      {output.urls?.length ? (
+        output.urls.length > 1 ? (
+          <div className="grid h-full w-full grid-cols-2 grid-rows-2 gap-px bg-white/5">
+            {output.urls.slice(0, 4).map((u) => (
+              <div key={u} className="relative min-h-0 min-w-0 overflow-hidden">
+                <MediaInner url={u} kind={output.kind} marks={marks} onImageSize={onImageSize} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="h-full w-full">
+            <MediaInner url={output.urls[0]} kind={output.kind} marks={marks} onImageSize={onImageSize} />
+          </div>
+        )
+      ) : null}
 
       {/* hover 放大按钮 */}
       <button

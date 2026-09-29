@@ -722,3 +722,161 @@ function MarkingBody({
     </div>
   );
 }
+
+/* ------------------ 图片参数弹层（LibTV：画质/清晰度/背景/比例/数量） ------------------ */
+
+import {
+  ASPECT_RATIOS,
+  IMAGE_BACKGROUNDS,
+  IMAGE_QUALITIES,
+  IMAGE_RESOLUTIONS,
+} from "@/lib/nodeTypes";
+import type { NodeParams } from "@/types";
+
+/** 比例宫格里的小画幅图标：14px 盒内按真实宽高比画一个矩形 */
+function RatioGlyph({ ratio, active }: { ratio: string; active?: boolean }) {
+  const [rw, rh] = ratio.split(":").map(Number);
+  const box = 14;
+  let w: number;
+  let h: number;
+  if (rw >= rh) {
+    w = box;
+    h = Math.max(3, Math.round((box * rh) / rw));
+  } else {
+    h = box;
+    w = Math.max(3, Math.round((box * rw) / rh));
+  }
+  return (
+    <span
+      className={cn(
+        "inline-block rounded-[2px] border",
+        active ? "border-white bg-white/25" : "border-white/45",
+      )}
+      style={{ width: w, height: h }}
+    />
+  );
+}
+
+function ParamSection({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="px-3 pt-2.5 pb-1">
+      <div className="mb-1.5 text-[11px] text-white/40">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+const pillCls = (active: boolean) =>
+  cn(
+    "flex h-7 flex-1 items-center justify-center rounded-md border text-[11.5px] transition",
+    active
+      ? "border-white/60 bg-white/12 text-white"
+      : "border-white/10 text-white/55 hover:border-white/25 hover:text-white/85",
+  );
+
+export function ImageParamsPopover({
+  params,
+  onChange,
+  className,
+}: {
+  params: NodeParams;
+  onChange: (patch: NodeParams) => void;
+  className?: string;
+}) {
+  const ratio = params.aspectRatio ?? "16:9";
+  const quality = params.quality ?? "标准画质";
+  const resolution = params.resolution ?? "2K";
+  const background = params.background ?? "自动";
+  const count = params.count ?? 1;
+
+  return (
+    <div className={cn(panelCls, "w-[336px]", className)}>
+      <div className="max-h-[420px] overflow-y-auto pb-2.5">
+        <ParamSection label="画质">
+          <div className="flex gap-1">
+            {IMAGE_QUALITIES.map((q) => (
+              <button
+                key={q}
+                onClick={() => onChange({ quality: q })}
+                className={pillCls(quality === q)}
+              >
+                {q.replace("画质", "")}
+              </button>
+            ))}
+          </div>
+        </ParamSection>
+        <ParamSection label="清晰度">
+          <div className="flex gap-1">
+            {IMAGE_RESOLUTIONS.map((r) => (
+              <button
+                key={r}
+                onClick={() => onChange({ resolution: r })}
+                className={pillCls(resolution === r)}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+        </ParamSection>
+        <ParamSection label="背景">
+          <div className="flex gap-1">
+            {IMAGE_BACKGROUNDS.map((b) => (
+              <button
+                key={b}
+                onClick={() => onChange({ background: b })}
+                className={pillCls(background === b)}
+              >
+                {b}
+              </button>
+            ))}
+          </div>
+        </ParamSection>
+        <ParamSection label="比例">
+          <div className="grid grid-cols-5 gap-1">
+            {ASPECT_RATIOS.map((r) => (
+              <button
+                key={r}
+                onClick={() => onChange({ aspectRatio: r })}
+                className={cn(
+                  "flex h-10 flex-col items-center justify-center gap-0.5 rounded-md border transition",
+                  ratio === r
+                    ? "border-white/60 bg-white/12"
+                    : "border-white/10 hover:border-white/25",
+                )}
+              >
+                <RatioGlyph ratio={r} active={ratio === r} />
+                <span
+                  className={cn(
+                    "text-[9.5px]",
+                    ratio === r ? "text-white" : "text-white/50",
+                  )}
+                >
+                  {r}
+                </span>
+              </button>
+            ))}
+          </div>
+        </ParamSection>
+        <ParamSection label="生成数量">
+          <div className="flex gap-1">
+            {[1, 2, 4].map((n) => (
+              <button
+                key={n}
+                onClick={() => onChange({ count: n })}
+                className={pillCls(count === n)}
+              >
+                {n}张
+              </button>
+            ))}
+          </div>
+        </ParamSection>
+      </div>
+    </div>
+  );
+}
