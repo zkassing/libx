@@ -211,6 +211,72 @@ function MarkOverlay({ url, marks }: { url: string; marks?: NodeMark[] }) {
 }
 
 /** 卡片内的单条媒体 */
+/* ------------------------------------------------------------------ */
+/* InlineVideo：节点卡片内联视频 —— 点击播放/暂停（对齐 LibTV），          */
+/* 暂停时中央播放钮；放大（large）时用原生 controls 自动播放。             */
+/* ------------------------------------------------------------------ */
+function InlineVideo({
+  url,
+  large,
+  onImageSize,
+}: {
+  url: string;
+  large?: boolean;
+  onImageSize?: (s: { w: number; h: number }) => void;
+}) {
+  const ref = React.useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = React.useState(false);
+
+  const toggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const v = ref.current;
+    if (!v) return;
+    if (v.paused) {
+      void v.play().catch(() => {});
+    } else {
+      v.pause();
+    }
+  };
+
+  return (
+    <div className="nodrag relative h-full w-full bg-black/40">
+      <video
+        ref={ref}
+        src={url}
+        controls={large}
+        autoPlay={large}
+        loop={!large}
+        playsInline
+        className="h-full w-full object-contain"
+        onClick={large ? undefined : toggle}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onLoadedMetadata={(e) => {
+          const v = e.currentTarget;
+          if (v.videoWidth && onImageSize) {
+            onImageSize({ w: v.videoWidth, h: v.videoHeight });
+          }
+        }}
+      />
+      {/* AI 生成角标（对齐 LibTV，与图片一致） */}
+      <span className="pointer-events-none absolute top-1.5 left-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white/70 backdrop-blur">
+        AI生成
+      </span>
+      {/* 暂停态播放钮（点击同区域即播放） */}
+      {!large && !playing && (
+        <button
+          type="button"
+          onClick={toggle}
+          title="播放"
+          className="absolute inset-0 flex items-center justify-center bg-black/10 transition hover:bg-black/20"
+        >
+          <Play className="size-10 fill-white/85 text-transparent drop-shadow" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function MediaInner({
   url,
   kind,
@@ -230,31 +296,7 @@ function MediaInner({
   const asAudio = isAudioUrl(url);
 
   if (asVideo) {
-    return (
-      <div className="relative h-full w-full bg-black/40">
-        <video
-          src={url}
-          controls={large}
-          autoPlay={large}
-          className="h-full w-full object-contain"
-          onLoadedMetadata={(e) => {
-            const v = e.currentTarget;
-            if (v.videoWidth && onImageSize) {
-              onImageSize({ w: v.videoWidth, h: v.videoHeight });
-            }
-          }}
-        />
-        {/* AI 生成角标（对齐 LibTV，与图片一致） */}
-        <span className="pointer-events-none absolute top-1.5 left-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white/70 backdrop-blur">
-          AI生成
-        </span>
-        {!large && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <Play className="size-10 fill-white/85 text-transparent drop-shadow" />
-          </div>
-        )}
-      </div>
-    );
+    return <InlineVideo url={url} large={large} onImageSize={onImageSize} />;
   }
   if (asAudio) {
     return (
