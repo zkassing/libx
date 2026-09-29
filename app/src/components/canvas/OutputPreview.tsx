@@ -231,12 +231,29 @@ function MediaInner({
 
   if (asVideo) {
     return (
-      <video
-        src={url}
-        controls={large}
-        autoPlay={large}
-        className="h-full w-full object-contain"
-      />
+      <div className="relative h-full w-full bg-black/40">
+        <video
+          src={url}
+          controls={large}
+          autoPlay={large}
+          className="h-full w-full object-contain"
+          onLoadedMetadata={(e) => {
+            const v = e.currentTarget;
+            if (v.videoWidth && onImageSize) {
+              onImageSize({ w: v.videoWidth, h: v.videoHeight });
+            }
+          }}
+        />
+        {/* AI 生成角标（对齐 LibTV，与图片一致） */}
+        <span className="pointer-events-none absolute top-1.5 left-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white/70 backdrop-blur">
+          AI生成
+        </span>
+        {!large && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <Play className="size-10 fill-white/85 text-transparent drop-shadow" />
+          </div>
+        )}
+      </div>
     );
   }
   if (asAudio) {

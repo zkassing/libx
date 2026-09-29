@@ -103,6 +103,9 @@ function ContextMenu({
   const nodeData = node?.data as FlowNodeData | undefined;
   const outputUrl =
     nodeData?.status === "succeeded" ? nodeData.output?.urls?.[0] : undefined;
+  const outputText =
+    nodeData?.status === "succeeded" ? nodeData.output?.text : undefined;
+  const hasOutput = !!(outputUrl || outputText);
 
   /** 产物写入系统剪贴板（对齐 LibTV「复制图片」） */
   const copyImage = async () => {
@@ -117,27 +120,40 @@ function ContextMenu({
     }
   };
 
-  /** 保存到我的资产（LibTV 右键第一项） */
+  /** 文本产物复制（文本/脚本节点） */
+  const copyText = async () => {
+    if (!outputText) return;
+    try {
+      await navigator.clipboard.writeText(outputText);
+    } catch {
+      /* 静默 */
+    }
+  };
+
+  /** 保存到我的资产（LibTV 右键第一项）；媒体存 url，文本存 text */
   const saveToAssets = async () => {
-    if (!outputUrl || !nodeData) return;
+    if (!nodeData || (!outputUrl && !outputText)) return;
     await fetch("/api/assets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         kind: nodeData.kind === "script" ? "text" : nodeData.kind,
         title: `${nodeData.title}${nodeData.index ? ` ${nodeData.index}` : ""} 的产物`,
-        url: outputUrl,
+        ...(outputUrl ? { url: outputUrl } : { text: outputText }),
         ...(nodeData.rating ? { rating: nodeData.rating } : {}),
       }),
     }).catch(() => {});
   };
 
   const outputItems =
-    menu.nodeId && outputUrl && nodeData
+    menu.nodeId && nodeData && hasOutput
       ? [
           { label: "保存到我的资产", icon: FolderDown, run: () => void saveToAssets() },
-          ...(nodeData.kind === "image"
+          ...(nodeData.kind === "image" && outputUrl
             ? [{ label: "复制图片", icon: ImageDown, run: () => void copyImage() }]
+            : []),
+          ...(outputText
+            ? [{ label: "复制文本", icon: Copy, run: () => void copyText() }]
             : []),
         ]
       : [];
@@ -186,7 +202,7 @@ function ContextMenu({
         style={{ left: menu.x, top: menu.y }}
       >
         {/* 评级（对齐 LibTV：产物节点右键第一行五角星） */}
-        {menu.nodeId && outputUrl && (
+        {menu.nodeId && hasOutput && (
           <div className="flex items-center gap-1 px-2.5 py-1.5">
             <span className="mr-1 text-[12.5px] text-white/55">评级</span>
             {[1, 2, 3, 4, 5].map((n) => (

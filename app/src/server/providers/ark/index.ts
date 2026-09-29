@@ -354,6 +354,17 @@ export const arkVideoProvider: GenProvider = {
         role: "first_frame",
       });
     }
+    // 首尾帧：首帧来自连线时尾帧取引用图第一张，否则取第二张
+    const lastImage = edgeImage
+      ? input.referenceImages?.[0]
+      : input.referenceImages?.[1];
+    if (lastImage) {
+      content.push({
+        type: "image_url",
+        image_url: { url: await toArkImageRef(lastImage) },
+        role: "last_frame",
+      });
+    }
 
     ctx.onProgress?.(5);
     throwIfAborted(ctx.signal);

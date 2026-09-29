@@ -727,9 +727,11 @@ function MarkingBody({
 
 import {
   ASPECT_RATIOS,
+  DURATIONS,
   IMAGE_BACKGROUNDS,
   IMAGE_QUALITIES,
   IMAGE_RESOLUTIONS,
+  RESOLUTIONS,
 } from "@/lib/nodeTypes";
 import type { NodeParams } from "@/types";
 
@@ -838,27 +840,109 @@ export function ImageParamsPopover({
           </div>
         </ParamSection>
         <ParamSection label="比例">
-          <div className="grid grid-cols-5 gap-1">
-            {ASPECT_RATIOS.map((r) => (
+          <RatioGrid value={ratio} onPick={(r) => onChange({ aspectRatio: r })} />
+        </ParamSection>
+        <ParamSection label="生成数量">
+          <div className="flex gap-1">
+            {[1, 2, 4].map((n) => (
+              <button
+                key={n}
+                onClick={() => onChange({ count: n })}
+                className={pillCls(count === n)}
+              >
+                {n}张
+              </button>
+            ))}
+          </div>
+        </ParamSection>
+      </div>
+    </div>
+  );
+}
+
+/** 比例宫格（图片/视频参数弹层共用） */
+function RatioGrid({
+  value,
+  onPick,
+}: {
+  value: string;
+  onPick: (r: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-5 gap-1">
+      {ASPECT_RATIOS.map((r) => (
+        <button
+          key={r}
+          onClick={() => onPick(r)}
+          className={cn(
+            "flex h-10 flex-col items-center justify-center gap-0.5 rounded-md border transition",
+            value === r
+              ? "border-white/60 bg-white/12"
+              : "border-white/10 hover:border-white/25",
+          )}
+        >
+          <RatioGlyph ratio={r} active={value === r} />
+          <span
+            className={cn(
+              "text-[9.5px]",
+              value === r ? "text-white" : "text-white/50",
+            )}
+          >
+            {r}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 视频参数弹层（与图片同一设计语言）：
+ * 比例 13 种图标宫格 / 清晰度 / 时长 / 生成数量。
+ * 模式（文生/图生/首尾帧）是生成方式，留在参数行独立 chip。
+ */
+export function VideoParamsPopover({
+  params,
+  onChange,
+  className,
+}: {
+  params: NodeParams;
+  onChange: (patch: NodeParams) => void;
+  className?: string;
+}) {
+  const ratio = params.aspectRatio ?? "16:9";
+  const resolution = params.resolution ?? "720P";
+  const duration = Number(params.duration) || 5;
+  const count = params.count ?? 1;
+
+  return (
+    <div className={cn(panelCls, "w-[336px]", className)}>
+      <div className="max-h-[420px] overflow-y-auto pb-2.5">
+        <ParamSection label="比例">
+          <RatioGrid value={ratio} onPick={(r) => onChange({ aspectRatio: r })} />
+        </ParamSection>
+        <ParamSection label="清晰度">
+          <div className="flex gap-1">
+            {RESOLUTIONS.map((r) => (
               <button
                 key={r}
-                onClick={() => onChange({ aspectRatio: r })}
-                className={cn(
-                  "flex h-10 flex-col items-center justify-center gap-0.5 rounded-md border transition",
-                  ratio === r
-                    ? "border-white/60 bg-white/12"
-                    : "border-white/10 hover:border-white/25",
-                )}
+                onClick={() => onChange({ resolution: r })}
+                className={pillCls(resolution === r)}
               >
-                <RatioGlyph ratio={r} active={ratio === r} />
-                <span
-                  className={cn(
-                    "text-[9.5px]",
-                    ratio === r ? "text-white" : "text-white/50",
-                  )}
-                >
-                  {r}
-                </span>
+                {r}
+              </button>
+            ))}
+          </div>
+        </ParamSection>
+        <ParamSection label="时长">
+          <div className="flex gap-1">
+            {DURATIONS.map((d) => (
+              <button
+                key={d}
+                onClick={() => onChange({ duration: d })}
+                className={pillCls(duration === d)}
+              >
+                {d}s
               </button>
             ))}
           </div>
@@ -871,7 +955,7 @@ export function ImageParamsPopover({
                 onClick={() => onChange({ count: n })}
                 className={pillCls(count === n)}
               >
-                {n}张
+                {n}个
               </button>
             ))}
           </div>

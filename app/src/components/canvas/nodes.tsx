@@ -64,6 +64,7 @@ import {
   MarkingDialog,
   PresetPopover,
   ImageParamsPopover,
+  VideoParamsPopover,
   useMarkSources,
   type CharacterDto,
   type MarkSource,
@@ -145,7 +146,7 @@ function StatusPill({ id, data }: { id: string; data: FlowNodeData }) {
 /* ------------------------------------------------------------------ */
 
 /** 空节点时的 "尝试" 建议（LibTV 里靠左但留出内边距）
- *  图片节点的两条是动作入口（图生图/图片高清→上传图片），其余纯展示 */
+ *  图片：图生图/图片高清=上传；视频：首尾帧/首帧=上传首帧；其余纯展示 */
 function SuggestionList({
   kind,
   onPick,
@@ -157,22 +158,25 @@ function SuggestionList({
   const icons =
     kind === "image" ? [Upload, HdIcon] : [InfinityIcon, Layers, Sparkles];
   if (!meta.suggestions?.length) return null;
+  // 视频的第一条（5 分钟超长视频）是纯提示，不可点
+  const clickable = (i: number) =>
+    !!onPick && (kind === "image" || (kind === "video" && i > 0));
   return (
     <div className="w-full px-6 text-left">
       <div className="mb-2.5 text-[12px] text-white/35">尝试:</div>
       <div className="flex flex-col gap-2">
         {meta.suggestions.map((s, i) => {
           const Icon = icons[i % icons.length];
-          const clickable = kind === "image" && !!onPick;
+          const can = clickable(i);
           return (
             <button
               key={s}
               type="button"
-              disabled={!clickable}
-              onClick={clickable ? () => onPick(s) : undefined}
+              disabled={!can}
+              onClick={can ? () => onPick?.(s) : undefined}
               className={cn(
                 "flex items-center gap-2.5 text-left text-[12.5px] text-white/60",
-                clickable && "cursor-pointer transition hover:text-white/90",
+                can && "cursor-pointer transition hover:text-white/90",
               )}
             >
               <Icon className="size-3.5 shrink-0 text-white/45" />
@@ -383,15 +387,23 @@ function NodeBody({ id, data }: { id: string; data: FlowNodeData }) {
       const url = j?.asset?.url as string | undefined;
       if (!res.ok || !url) throw new Error(j?.error ?? "上传失败");
       const hd = uploadActionRef.current === "图片高清";
-      updateNodeData(id, {
-        status: "succeeded",
-        output: { kind: "image", urls: [url] },
-        ...(hd ? { prompt: "高清放大，保持画面内容、构图、色彩完全不变" } : {}),
-      });
-      updateNodeParams(id, {
-        mode: "图生图",
-        ...(hd ? { resolution: "4K", quality: "高画质" } : {}),
-      });
+      if (kind === "video") {
+        // 视频空态：上传的图作为首帧（首尾帧动作顺带切模式）
+        updateNodeParams(id, {
+          firstFrame: url,
+          mode: uploadActionRef.current === "首尾帧生成视频" ? "首尾帧" : "图生视频",
+        });
+      } else {
+        updateNodeData(id, {
+          status: "succeeded",
+          output: { kind: "image", urls: [url] },
+          ...(hd ? { prompt: "高清放大，保持画面内容、构图、色彩完全不变" } : {}),
+        });
+        updateNodeParams(id, {
+          mode: "图生图",
+          ...(hd ? { resolution: "4K", quality: "高画质" } : {}),
+        });
+      }
     } catch {
       /* 静默：上传失败保持空态 */
     } finally {
@@ -423,19 +435,41 @@ function NodeBody({ id, data }: { id: string; data: FlowNodeData }) {
   }
 
   if (kind === "video" || kind === "image" || kind === "audio") {
+    const firstFrame =
+      kind === "video" ? (data.params?.firstFrame as string | undefined) : undefined;
     return (
       <div className="flex h-full flex-col items-center justify-center gap-5 text-[#525252]">
-        {kind === "video" && (
+        {kind === "video" && !firstFrame && (
           <Play className="size-10 fill-[#525252] text-transparent" />
         )}
         {kind === "image" && <ImageIcon className="size-10" strokeWidth={1.4} />}
         {kind === "audio" && <AudioBars />}
+        {/* 视频首帧：空态上传后显示缩略图，可移除 */}
+        {firstFrame && (
+          <div className="relative w-4/5 overflow-hidden rounded-lg border border-white/10">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={firstFrame} alt="首帧" className="w-full object-cover" />
+            <span className="absolute top-1.5 left-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white/75">
+              首帧
+            </span>
+            <button
+              className="absolute top-1.5 right-1.5 flex size-5 items-center justify-center rounded-full bg-black/60 text-white/80 transition hover:bg-black/85 hover:text-white"
+              title="移除首帧"
+              onClick={() => updateNodeParams(id, { firstFrame: undefined })}
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        )}
         {uploading ? (
           <div className="flex items-center gap-2 text-[12px] text-white/50">
             <Loader2 className="size-3.5 animate-spin" /> 上传中…
           </div>
         ) : (
-          <SuggestionList kind={kind} onPick={kind === "image" ? pickUpload : undefined} />
+          <SuggestionList
+            kind={kind}
+            onPick={kind === "image" || kind === "video" ? pickUpload : undefined}
+          />
         )}
         {/* 空态上传入口（图生图 / 图片高清） */}
         <input
@@ -551,6 +585,43 @@ function MergedImageParams({
             updateNodeParams(id, {
               ...patch,
               // 用户显式选过比例后，AutoLink 不再用上游契约覆盖
+              ...(patch.aspectRatio ? { ratioLocked: true } : {}),
+            })
+          }
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** 视频合并参数 chip：「16:9 · 720P · 5s · 1个」+ 弹层（与图片同一设计语言） */
+function MergedVideoParams({
+  id,
+  params,
+}: {
+  id: string;
+  params: import("@/types").NodeParams;
+}) {
+  const updateNodeParams = useCanvasStore((s) => s.updateNodeParams);
+  const [open, setOpen] = React.useState(false);
+  const label = `${params.aspectRatio ?? "16:9"} · ${params.resolution ?? "720P"} · ${Number(params.duration) || 5}s · ${params.count ?? 1}个`;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-white/70 transition hover:bg-white/8 hover:text-white">
+          <span className="max-w-[220px] truncate">{label}</span>
+          <ChevronDown className={cn("size-3 opacity-60 transition-transform", open && "rotate-180")} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-auto border-0 bg-transparent p-0 shadow-none"
+      >
+        <VideoParamsPopover
+          params={params}
+          onChange={(patch) =>
+            updateNodeParams(id, {
+              ...patch,
               ...(patch.aspectRatio ? { ratioLocked: true } : {}),
             })
           }
@@ -1000,10 +1071,10 @@ function Composer({
   // 该节点种类下真正适用的参数（对齐 LibTV 字段清单 / PRD §13.2）。
   // 文本只有模型；图片=模型·模式·比例·数量；视频=模型·模式·比例·分辨率·时长·数量；
   // 音频=模型·模式·时长·数量；脚本=模型·模式。
-  const showRatio = data.kind === "video"; // 图片比例并入合并参数 chip
-  const showResolution = data.kind === "video";
-  const showDuration = data.kind === "video" || data.kind === "audio";
-  const showCount = data.kind === "video" || data.kind === "audio"; // 图片数量并入合并参数 chip
+  const showRatio = false; // 图片/视频比例均并入各自的合并参数 chip
+  const showResolution = false;
+  const showDuration = data.kind === "audio";
+  const showCount = data.kind === "audio"; // 图片/视频数量并入合并参数 chip
 
   return (
     <div
@@ -1076,6 +1147,11 @@ function Composer({
             点开是画质/清晰度/背景/比例/数量的宫格弹层 */}
         {data.kind === "image" && (
           <MergedImageParams id={id} params={p} />
+        )}
+        {/* 视频节点：同一设计语言「16:9 · 720P · 5s · 1个」合并 chip，
+            点开是比例/清晰度/时长/数量弹层；模式保持独立 chip（生成方式非参数） */}
+        {data.kind === "video" && (
+          <MergedVideoParams id={id} params={p} />
         )}
         {meta.modes && data.kind !== "image" && (
           <ChipSelect

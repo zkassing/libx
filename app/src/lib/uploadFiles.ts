@@ -85,29 +85,39 @@ function ratioValue(r: string): number {
   return w > 0 && h > 0 ? w / h : 16 / 9;
 }
 
-/** 上传成功后读图片真实尺寸，把卡片比例吸附到最接近的标准比例（竖图不再被 16:9 黑框装） */
-function adoptImageAspect(nodeId: string, url: string): void {
-  const img = new Image();
-  img.onload = () => {
-    if (!img.naturalWidth || !img.naturalHeight) return;
-    const actual = img.naturalWidth / img.naturalHeight;
-    let best: string | null = null;
-    let bestDiff = Infinity;
-    for (const r of ASPECT_RATIOS) {
-      const diff = Math.abs(Math.log(actual / ratioValue(r)));
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        best = r;
-      }
+/** 按真实宽高把卡片比例吸附到最接近的标准比例，并锁定 */
+function adoptAspect(nodeId: string, w: number, h: number): void {
+  if (!w || !h) return;
+  const actual = w / h;
+  let best: string | null = null;
+  let bestDiff = Infinity;
+  for (const r of ASPECT_RATIOS) {
+    const diff = Math.abs(Math.log(actual / ratioValue(r)));
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = r;
     }
-    if (best) {
-      useCanvasStore.getState().updateNodeParams(nodeId, {
-        aspectRatio: best,
-        ratioLocked: true,
-      });
-    }
-  };
-  img.src = url;
+  }
+  if (best) {
+    useCanvasStore.getState().updateNodeParams(nodeId, {
+      aspectRatio: best,
+      ratioLocked: true,
+    });
+  }
+}
+
+/** 上传成功后读媒体真实尺寸，把卡片比例吸附到最接近的标准比例（竖图/竖视频不再被 16:9 黑框装） */
+function adoptMediaAspect(nodeId: string, url: string, kind: NodeKind): void {
+  if (kind === "image") {
+    const img = new Image();
+    img.onload = () => adoptAspect(nodeId, img.naturalWidth, img.naturalHeight);
+    img.src = url;
+  } else if (kind === "video") {
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    v.onloadedmetadata = () => adoptAspect(nodeId, v.videoWidth, v.videoHeight);
+    v.src = url;
+  }
 }
 
 const truncateName = (name: string) =>
@@ -156,7 +166,7 @@ export async function materializeFilesToCanvas(
             progress: 100,
             output: { kind, urls: [url] },
           });
-          if (kind === "image") adoptImageAspect(nid, url);
+          if (kind === "image" || kind === "video") adoptMediaAspect(nid, url, kind);
         }
         done += 1;
       } catch (err) {

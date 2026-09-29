@@ -135,6 +135,14 @@ export async function resolveRefs(
     for (const u of nodeData.output?.urls ?? []) pushImage(u);
   }
 
+  // 视频空态上传的「首帧 / 尾帧」：按图生视频语义把首帧放首位
+  if (nodeData.kind === "video") {
+    const first = nodeData.params?.firstFrame;
+    const last = nodeData.params?.lastFrame;
+    if (typeof first === "string" && first) pushImage(first);
+    if (typeof last === "string" && last) pushImage(last);
+  }
+
   if (!refs.length) return out;
 
   // 节点 / 素材类引用：批量取节点行（asset: 前缀是「上游节点的产物」写法）
