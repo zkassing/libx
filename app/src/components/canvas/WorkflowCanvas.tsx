@@ -18,7 +18,7 @@ import { Ban, Copy, CopyPlus, FolderDown, Group as GroupIcon, ImageDown, Star, T
 import { nodeTypes, NODE_ICONS } from "@/components/canvas/nodes";
 import { edgeTypes } from "@/components/canvas/FlowEdge";
 import { NodeActionsBar } from "@/components/canvas/NodeActionsBar";
-import { NODE_META, NODE_KINDS } from "@/lib/nodeTypes";
+import { NODE_META, NODE_KINDS, displayNodeTitle } from "@/lib/nodeTypes";
 import { checkConnection } from "@/lib/connections";
 import { nextNodePosition } from "@/lib/placement";
 import { centerAt, reuseAsset } from "@/lib/assets";
@@ -138,7 +138,7 @@ function ContextMenu({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         kind: nodeData.kind === "script" ? "text" : nodeData.kind,
-        title: `${nodeData.title}${nodeData.index ? ` ${nodeData.index}` : ""} 的产物`,
+        title: `${displayNodeTitle(nodeData)} 的产物`,
         ...(outputUrl ? { url: outputUrl } : { text: outputText }),
         ...(nodeData.rating ? { rating: nodeData.rating } : {}),
       }),

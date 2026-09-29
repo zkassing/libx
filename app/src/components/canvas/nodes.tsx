@@ -40,7 +40,7 @@ import {
   Wand2,
   X,
 } from "lucide-react";
-import { ASPECT_RATIOS, DURATIONS, NODE_META, RESOLUTIONS } from "@/lib/nodeTypes";
+import { ASPECT_RATIOS, displayNodeTitle, DURATIONS, NODE_META, RESOLUTIONS } from "@/lib/nodeTypes";
 import {
   NODE_LABEL_H,
   TEXT_CARD_MAX,
@@ -192,8 +192,16 @@ function SuggestionList({
 /* `@` 引用胶囊行 */
 function RefChips({ id, data }: { id: string; data: FlowNodeData }) {
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const nodes = useCanvasStore((s) => s.nodes);
   const refs = data.refs ?? [];
   if (refs.length === 0) return null;
+
+  /** node 引用的名称实时跟随节点当前显示名（改名后 chip 不过时） */
+  const liveLabel = (ref: NodeRef) => {
+    if (ref.type !== "node") return ref.label;
+    const n = nodes.find((x) => x.id === ref.id);
+    return n ? displayNodeTitle(n.data as FlowNodeData) : ref.label;
+  };
 
   const remove = (ref: NodeRef) => {
     const next = refs.filter((r) => r.id !== ref.id);
@@ -228,7 +236,7 @@ function RefChips({ id, data }: { id: string; data: FlowNodeData }) {
           ) : (
             <Sparkles className="size-3" />
           )}
-          {ref.label}
+          {liveLabel(ref)}
           <button
             onClick={() => remove(ref)}
             className="flex size-3.5 items-center justify-center rounded-full text-white/40 transition hover:bg-white/15 hover:text-white"
@@ -691,8 +699,7 @@ function NodeEditorDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-[15px]">
             <Icon className="size-4 text-white/60" />
-            {data.title}
-            {data.index ? ` ${data.index}` : ""}
+            {displayNodeTitle(data)}
           </DialogTitle>
           <DialogDescription className="text-[12px]">
             {meta.outputLabel} · 在教学模式下这一步的提示词与参数可被锁定（M4）
@@ -1293,6 +1300,64 @@ function Composer({
 /* 节点外壳                                                            */
 /* ------------------------------------------------------------------ */
 
+/** 节点标题：默认显示「类型名 + 序号」，双击进入编辑（回车/失焦保存，Esc 取消） */
+function EditableNodeTitle({ id, data }: { id: string; data: FlowNodeData }) {
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState("");
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const label = displayNodeTitle(data);
+
+  React.useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  const commit = () => {
+    const next = draft.trim();
+    // 非空且变了 → 用新名；清空 → 回退类型默认名
+    if (next && next !== data.title) {
+      updateNodeData(id, { title: next });
+    } else if (!next) {
+      updateNodeData(id, { title: NODE_META[data.kind].label });
+    }
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") setEditing(false);
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+        className="nodrag h-5 w-36 rounded border border-white/25 bg-black/60 px-1.5 text-[12px] text-white/90 outline-none"
+      />
+    );
+  }
+  return (
+    <span
+      className="-mx-0.5 cursor-text truncate rounded px-0.5 transition hover:bg-white/8 hover:text-white/70"
+      title="双击改名"
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        setDraft(data.title);
+        setEditing(true);
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
 /**
  * 卡片右下角的尺寸手柄（文本节点）。
  * 拖动即改卡片宽 / 高：位移除以当前缩放换算回画布坐标，
@@ -1483,16 +1548,14 @@ function BaseNode({ id, data, selected }: NodeProps<FlowNode>) {
       {/* 扩大的感应区：鼠标移出卡片一点（30px 半圆弧内）仍能驱动端口跟随 */}
       <div aria-hidden className="absolute -inset-x-9 -inset-y-2" />
 
-      {/* 节点标签：高度锁 NODE_LABEL_H，避免图标撑开后卡片高度被挤掉 */}
+      {/* 节点标签：高度锁 NODE_LABEL_H，避免图标撑开后卡片高度被挤掉。
+          双击可改名（自定义后不再带序号；清空则回退默认名） */}
       <div
         style={{ height: NODE_LABEL_H }}
         className="flex shrink-0 items-center gap-1.5 text-[12px] text-white/45"
       >
         <Icon className="size-3" strokeWidth={1.8} />
-        <span className="truncate">
-          {data.title}
-          {data.index ? ` ${data.index}` : ""}
-        </span>
+        <EditableNodeTitle id={id} data={data} />
         <StatusPill id={id} data={data} />
         {/* 评级星标（右键菜单「评级」设置） */}
         {!!data.rating && (

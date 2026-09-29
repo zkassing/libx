@@ -355,7 +355,7 @@ export function useMarkSources(nodeId: string, data: FlowNodeData) {
       if (!upIds.has(n.id)) continue;
       const d = n.data as FlowNodeData;
       if (d.kind === "image" && d.status === "succeeded") {
-        push(n.id, `${d.title}${d.index ? ` ${d.index}` : ""}`, d);
+        push(n.id, displayNodeTitle(d), d);
       }
     }
     return sources;
@@ -727,6 +727,7 @@ function MarkingBody({
 
 import {
   ASPECT_RATIOS,
+  displayNodeTitle,
   DURATIONS,
   IMAGE_BACKGROUNDS,
   IMAGE_QUALITIES,

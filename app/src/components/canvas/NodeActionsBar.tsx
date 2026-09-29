@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useCanvasStore } from "@/stores/canvasStore";
+import { displayNodeTitle } from "@/lib/nodeTypes";
 import { flowNodeSize, type FlowNodeData } from "@/types";
 import {
   Copy,
@@ -64,7 +65,7 @@ export function NodeActionsBar() {
         {
           id: node.id,
           type: "node",
-          label: `${data.title}${data.index ? ` ${data.index}` : ""}`,
+          label: displayNodeTitle(data),
         },
       ],
     });

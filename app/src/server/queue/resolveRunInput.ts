@@ -12,6 +12,7 @@ import {
   resolveVariableValues,
   rowToVariable,
 } from "@/server/teaching/variables";
+import { displayNodeTitle } from "@/lib/nodeTypes";
 
 /* ------------------------------------------------------------------ */
 /* 节点运行的输入解析（route 入队 / worker 执行 共用）                    */
@@ -75,7 +76,7 @@ export async function resolveUpstreams(workflowId: string, nodeId: string) {
     } catch {
       continue;
     }
-    const display = `${ud.title}${ud.index ? ` ${ud.index}` : ""}`;
+    const display = displayNodeTitle(ud);
     if (ud.status !== "succeeded" || !ud.output) {
       pending.push(display || ur.id);
       pendingIds.push(ur.id);
@@ -175,7 +176,7 @@ export async function resolveRefs(
         continue;
       }
       if (ud.status !== "succeeded" || !ud.output) continue;
-      const title = `@${ud.title}${ud.index ? ` ${ud.index}` : ""}`;
+      const title = `@${displayNodeTitle(ud)}`;
       const images = (ud.output.urls ?? []).filter(Boolean);
       images.forEach(pushImage);
       out.upstreams.push({

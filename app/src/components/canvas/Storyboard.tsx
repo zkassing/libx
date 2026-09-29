@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { useCanvasStore } from "@/stores/canvasStore";
 import { cn } from "@/lib/utils";
+import { displayNodeTitle } from "@/lib/nodeTypes";
 
 const KIND_ICON = {
   text: TypeIcon,
@@ -143,8 +144,7 @@ export function StoryboardDialog({
                   <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                     <div className="flex items-center gap-1.5">
                       <span className="truncate text-[13px] font-medium text-white/85">
-                        {d.title}
-                        {d.index ? ` ${d.index}` : ""}
+                        {displayNodeTitle(d)}
                       </span>
                       {ok ? (
                         <CheckCircle2 className="size-3.5 shrink-0 text-emerald-400/90" />

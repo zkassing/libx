@@ -101,6 +101,20 @@ export const NODE_META: Record<NodeKind, NodeMeta> = {
 
 export const NODE_KINDS = Object.keys(NODE_META) as NodeKind[];
 
+/**
+ * 节点显示名：默认名（=kind 的中文名）带序号「文本节点 3」；
+ * 用户自定义过名字后不再拼序号（「主角特写」而不是「主角特写 3」）。
+ */
+export function displayNodeTitle(data: {
+  kind: NodeKind;
+  title?: string;
+  index?: number;
+}): string {
+  const t = data.title ?? "";
+  const isDefault = t === NODE_META[data.kind]?.label;
+  return isDefault && data.index ? `${t} ${data.index}` : t;
+}
+
 /* 对齐 LibTV 实测：13 种比例（带图标宫格选择） */
 export const ASPECT_RATIOS = [
   "1:1", "1:2", "2:1", "9:16", "16:9",
