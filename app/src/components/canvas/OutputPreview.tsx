@@ -239,7 +239,9 @@ function InlineVideo({
   };
 
   return (
-    <div className="nodrag relative h-full w-full bg-black/40">
+    // 注意：不能加 nodrag——产物区几乎占满卡片，加了整个节点都拖不动；
+    // React Flow 要拖动才会拖节点，纯点击（无位移）正常触发播放。
+    <div className="relative h-full w-full bg-black/40">
       <video
         ref={ref}
         src={url}
