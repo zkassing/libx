@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { Edge, Node } from "@xyflow/react";
+import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import {
@@ -128,6 +129,32 @@ export async function PUT(req: Request, ctx: Ctx) {
     select: { updatedAt: true },
   });
   return NextResponse.json({ ok: true, savedAt: updated?.updatedAt });
+}
+
+/** PATCH /api/workflows/:id —— 局部更新（目前仅标题重命名；绝不动节点/边） */
+const patchSchema = z.object({
+  title: z.string().trim().min(1, "名称不能为空").max(40),
+});
+
+export async function PATCH(req: Request, ctx: Ctx) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "未登录" }, { status: 401 });
+  }
+  const { id } = await ctx.params;
+  const wf = await ownedWorkflow(id, session.user.id);
+  if (!wf) {
+    return NextResponse.json({ error: "工作流不存在" }, { status: 404 });
+  }
+  const parsed = patchSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ error: "名称不正确（1-40 字）" }, { status: 400 });
+  }
+  const updated = await prisma.workflow.update({
+    where: { id },
+    data: { title: parsed.data.title },
+  });
+  return NextResponse.json({ ok: true, title: updated.title });
 }
 
 /** DELETE /api/workflows/:id */

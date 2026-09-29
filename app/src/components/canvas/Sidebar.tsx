@@ -22,6 +22,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { PromptDialog } from "@/components/ui/confirm-dialog";
 import { useCanvasPrefs } from "@/stores/canvasPrefs";
 import { useCanvasStore } from "@/stores/canvasStore";
 import { NodeList } from "@/components/canvas/NodeList";
@@ -185,50 +186,98 @@ function WorkspaceMenu() {
   );
 }
 
-/** 画布（工作流）切换；点击列出全部工作流（展开态 / 收起态共用） */
+/** 画布（工作流）切换；点击名字重命名，点击「画布 1 ▾」列出全部工作流 */
 export function CanvasMenu() {
   const router = useRouter();
   const currentId = useCanvasStore((s) => s.workflowId);
   const [items, setItems] = React.useState<
     Array<{ id: string; title: string }>
   >([]);
+  const [renameOpen, setRenameOpen] = React.useState(false);
+  const [renaming, setRenaming] = React.useState(false);
 
-  async function load() {
+  const load = React.useCallback(async () => {
     const res = await fetch("/api/workflows");
     if (res.ok) {
       const j = (await res.json()) as { workflows: Array<{ id: string; title: string }> };
       setItems(j.workflows);
     }
-  }
+  }, []);
+
+  // 挂载即拉取（之前只在点开下拉时拉）：标题展示与重命名默认值都依赖它
+  React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
+  }, [load, currentId]);
 
   const current = items.find((w) => w.id === currentId);
 
+  /** 重命名提交：PATCH 只改标题（PUT 是整图保存，拿它改名会清空节点） */
+  async function rename(title: string) {
+    if (!currentId || renaming) return;
+    setRenaming(true);
+    try {
+      const res = await fetch(`/api/workflows/${currentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) return;
+      setItems((list) =>
+        list.map((w) => (w.id === currentId ? { ...w, title } : w)),
+      );
+      setRenameOpen(false);
+    } finally {
+      setRenaming(false);
+    }
+  }
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <>
+      <div className="flex items-center gap-1.5 whitespace-nowrap text-[13px]">
+        {/* 名字本身：点击重命名（对齐 LibTV 画布名改名） */}
         <button
-          onClick={() => void load()}
-          className="flex items-center gap-1.5 whitespace-nowrap rounded-lg px-1 py-1 text-[13px] text-white/85 transition hover:bg-white/8"
+          onClick={() => setRenameOpen(true)}
+          title="点击重命名"
+          className="max-w-40 truncate rounded-md px-1 py-1 text-white/85 transition hover:bg-white/8"
         >
           {current?.title ?? "未命名工作区"}
-          <span className="text-white/25">|</span>
-          <span className="flex items-center gap-0.5 text-white/85">
-            画布 1<ChevronDown className="h-3.5 w-3.5 text-white/40" />
-          </span>
         </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-52">
-        {items.map((w) => (
-          <DropdownMenuItem
-            key={w.id}
-            onSelect={() => w.id !== currentId && router.push(`/canvas/${w.id}`)}
-            className="text-[12.5px]"
-          >
-            {w.title}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="flex items-center gap-1.5 rounded-lg px-1 py-1 text-white/85 transition hover:bg-white/8">
+              <span className="text-white/25">|</span>
+              <span className="flex items-center gap-0.5">
+                画布 1<ChevronDown className="h-3.5 w-3.5 text-white/40" />
+              </span>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-52">
+            {items.map((w) => (
+              <DropdownMenuItem
+                key={w.id}
+                onSelect={() => w.id !== currentId && router.push(`/canvas/${w.id}`)}
+                className="text-[12.5px]"
+              >
+                {w.title}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <PromptDialog
+        open={renameOpen}
+        onOpenChange={setRenameOpen}
+        title="重命名工作流"
+        defaultValue={current?.title ?? ""}
+        placeholder="工作流名称"
+        confirmText="重命名"
+        maxLength={40}
+        busy={renaming}
+        onSubmit={rename}
+      />
+    </>
   );
 }
 
