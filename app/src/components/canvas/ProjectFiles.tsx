@@ -15,6 +15,7 @@ import {
   Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ConfirmDialog, PromptDialog } from "@/components/ui/confirm-dialog";
 
 export type ProjectAsset = {
   id: string;
@@ -46,6 +47,12 @@ export function ProjectFiles({ workflowId }: { workflowId: string | null }) {
   const [query, setQuery] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement>(null);
+  /** 文件夹命名弹窗（新建 / 重命名共用），替代原生 prompt */
+  const [nameDialog, setNameDialog] = React.useState<
+    { mode: "create" } | { mode: "rename"; id: string; old: string } | null
+  >(null);
+  /** 待确认删除的文件夹 id，替代原生 confirm */
+  const [deleteFolderId, setDeleteFolderId] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     if (!workflowId) return;
@@ -62,35 +69,34 @@ export function ProjectFiles({ workflowId }: { workflowId: string | null }) {
     void load();
   }, [load]);
 
-  async function createFolder() {
+  async function createFolder(name: string) {
     if (!workflowId) return;
-    const name = window.prompt("文件夹名称", "新建文件夹");
-    if (!name?.trim()) return;
     await fetch("/api/asset-folders", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ workflowId, name, parentId: current }),
     });
     if (current) setExpanded((s) => new Set(s).add(current));
+    setNameDialog(null);
     void load();
   }
 
-  async function renameFolder(id: string, old: string) {
-    const name = window.prompt("重命名文件夹", old);
-    if (!name?.trim()) return;
+  async function renameFolder(id: string, name: string) {
     await fetch(`/api/asset-folders/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name }),
     });
+    setNameDialog(null);
     void load();
   }
 
-  async function removeFolder(id: string) {
-    const ok = window.confirm("删除文件夹？里面的文件会移到待分类资产。");
-    if (!ok) return;
-    await fetch(`/api/asset-folders/${id}`, { method: "DELETE" });
-    if (current === id) setCurrent(null);
+  /** 确认删除文件夹 */
+  async function confirmRemoveFolder() {
+    if (!deleteFolderId) return;
+    await fetch(`/api/asset-folders/${deleteFolderId}`, { method: "DELETE" });
+    if (current === deleteFolderId) setCurrent(null);
+    setDeleteFolderId(null);
     void load();
   }
 
@@ -143,7 +149,7 @@ export function ProjectFiles({ workflowId }: { workflowId: string | null }) {
             className="w-full min-w-0 bg-transparent text-[11px] text-white placeholder:text-white/30 focus:outline-none"
           />
         </div>
-        <IconTool title="新建文件夹" onClick={() => void createFolder()}>
+        <IconTool title="新建文件夹" onClick={() => setNameDialog({ mode: "create" })}>
           <FolderPlus className="h-3.5 w-3.5" />
         </IconTool>
         <input
@@ -190,8 +196,8 @@ export function ProjectFiles({ workflowId }: { workflowId: string | null }) {
                 current={current}
                 onToggle={toggle}
                 onOpen={setCurrent}
-                onRename={renameFolder}
-                onDelete={removeFolder}
+                onRename={(id, old) => setNameDialog({ mode: "rename", id, old })}
+                onDelete={(id) => setDeleteFolderId(id)}
               />
             ))}
       </div>
@@ -239,6 +245,36 @@ export function ProjectFiles({ workflowId }: { workflowId: string | null }) {
           </div>
         </div>
       </div>
+
+      {/* 新建 / 重命名文件夹（UI 组件弹窗，替代原生 prompt） */}
+      <PromptDialog
+        open={nameDialog !== null}
+        onOpenChange={(v) => {
+          if (!v) setNameDialog(null);
+        }}
+        title={nameDialog?.mode === "rename" ? "重命名文件夹" : "新建文件夹"}
+        defaultValue={nameDialog?.mode === "rename" ? nameDialog.old : ""}
+        placeholder="文件夹名称"
+        confirmText={nameDialog?.mode === "rename" ? "重命名" : "创建"}
+        onSubmit={async (name) => {
+          if (!nameDialog) return;
+          if (nameDialog.mode === "create") await createFolder(name);
+          else await renameFolder(nameDialog.id, name);
+        }}
+      />
+
+      {/* 删除文件夹确认（UI 组件弹窗，替代原生 confirm） */}
+      <ConfirmDialog
+        open={deleteFolderId !== null}
+        onOpenChange={(v) => {
+          if (!v) setDeleteFolderId(null);
+        }}
+        title="删除文件夹？"
+        description="里面的文件会移到待分类资产。"
+        confirmText="删除"
+        danger
+        onConfirm={confirmRemoveFolder}
+      />
     </div>
   );
 }

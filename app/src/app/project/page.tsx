@@ -16,6 +16,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { GlobalNav } from "@/components/home/GlobalNav";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type ProjectCard = {
   id: string;
@@ -34,6 +35,9 @@ export default function ProjectHomePage() {
   const [query, setQuery] = React.useState("");
   const [creating, setCreating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  /** 待确认删除的项目 id（删除走 UI 组件确认弹窗，不用原生 confirm） */
+  const [deleteId, setDeleteId] = React.useState<string | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
 
   /** 会话失效（未登录 / 账号已不存在）：清掉 cookie 再去登录，避免被 middleware 弹回画布卡死 */
   const gotoLogin = React.useCallback(async () => {
@@ -97,12 +101,25 @@ export default function ProjectHomePage() {
     }
   }
 
-  async function removeProject(e: React.MouseEvent, id: string) {
+  /** 点击删除按钮：先开确认弹窗（stopPropagation 避免跳转画布） */
+  function askRemoveProject(e: React.MouseEvent, id: string) {
     e.stopPropagation();
-    const ok = window.confirm("确定删除这个项目？画布与节点会一并删除。");
-    if (!ok) return;
-    const res = await fetch(`/api/workflows/${id}`, { method: "DELETE" });
-    if (res.ok) void load();
+    setDeleteId(id);
+  }
+
+  /** 确认删除 */
+  async function confirmRemoveProject() {
+    if (!deleteId || deleting) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/workflows/${deleteId}`, { method: "DELETE" });
+      if (res.ok) {
+        setDeleteId(null);
+        void load();
+      }
+    } finally {
+      setDeleting(false);
+    }
   }
 
   /** 复制副本（服务端重映射节点 id，副本运行态会被清空） */
@@ -225,7 +242,7 @@ export default function ProjectHomePage() {
                         <Copy className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        onClick={(e) => removeProject(e, p.id)}
+                        onClick={(e) => askRemoveProject(e, p.id)}
                         className="flex h-7 w-7 items-center justify-center rounded-md bg-black/55 text-white/70 transition hover:bg-red-500/80 hover:text-white"
                         title="删除项目"
                       >
@@ -253,6 +270,20 @@ export default function ProjectHomePage() {
           )}
         </div>
       </main>
+
+      {/* 删除项目确认（UI 组件弹窗，替代原生 confirm） */}
+      <ConfirmDialog
+        open={deleteId !== null}
+        onOpenChange={(v) => {
+          if (!v) setDeleteId(null);
+        }}
+        title="删除这个项目？"
+        description="画布与节点会一并删除，且不可恢复。"
+        confirmText="删除"
+        danger
+        busy={deleting}
+        onConfirm={confirmRemoveProject}
+      />
     </div>
   );
 }
