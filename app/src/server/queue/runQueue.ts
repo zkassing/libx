@@ -80,6 +80,26 @@ function createQueue(): RunQueue {
   const cache = new Map<string, { nodeId: string; workflowId: string }>();
 
   /** 把任务标记为失败（并发布事件） */
+  /** 失败 / 取消时把画布节点状态落库回收（run 路由入队时落了 queued，
+   *  不回收的话刷新后节点永远显示「排队中」）；已成功的不覆盖。 */
+  const settleCanvasNode = async (
+    nodeId: string,
+    status: "failed" | "canceled",
+  ) => {
+    const row = await prisma.canvasNode.findUnique({ where: { id: nodeId } });
+    if (!row) return;
+    try {
+      const d = JSON.parse(row.data) as FlowNodeData;
+      if (d.status === "succeeded") return;
+      await prisma.canvasNode.update({
+        where: { id: nodeId },
+        data: { data: JSON.stringify({ ...d, status, progress: 0 }) },
+      });
+    } catch {
+      /* 静默 */
+    }
+  };
+
   const fail = async (
     runId: string,
     message: string,
@@ -88,6 +108,8 @@ function createQueue(): RunQueue {
       where: { id: runId },
       data: { status: "failed", error: message, progress: 0, finishedAt: new Date() },
     });
+    const cached = cache.get(runId);
+    if (cached) await settleCanvasNode(cached.nodeId, "failed");
     emit(runId, "failed", { progress: 0, error: message });
   };
 
@@ -131,6 +153,7 @@ function createQueue(): RunQueue {
       error: message,
       at: Date.now(),
     });
+    if (info?.nodeId) await settleCanvasNode(info.nodeId, "canceled");
     if (temp) cache.delete(runId);
     return true;
   };
@@ -169,10 +192,31 @@ function createQueue(): RunQueue {
         return;
       }
 
-      const { upstreams, pending } = await resolveUpstreams(workflowId, nodeId);
-      if (pending.length > 0) {
-        await fail(runId, `上游节点还没生成产物：${pending.join("、")}`);
-        return;
+      // 上游未就绪：若上游有活跃任务（queued/running）→ 原地等待，
+      // 每 1.5s 重查直到就绪（对齐 LibTV：下游排队等上游）；
+      // 若没有任何任务在跑它 → 立即失败（等也没结果）。
+      // 等待期间占住一个并发槽，超时 / 取消由 timeoutTimer+abort 兼底。
+      let { upstreams, pending, pendingIds } = await resolveUpstreams(
+        workflowId,
+        nodeId,
+      );
+      while (pending.length > 0) {
+        if (ctrl.signal.aborted) throw new Error("aborted");
+        const activeUpstreamRuns = await prisma.nodeRun.count({
+          where: {
+            nodeId: { in: pendingIds },
+            status: { in: ["queued", "running"] },
+          },
+        });
+        if (activeUpstreamRuns === 0) {
+          await fail(runId, `上游节点还没生成产物：${pending.join("、")}`);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+        const again = await resolveUpstreams(workflowId, nodeId);
+        upstreams = again.upstreams;
+        pending = again.pending;
+        pendingIds = again.pendingIds;
       }
 
       // 1.5) 变量渲染：从本次运行 input 取提交值，回退老师默认，渲染 {{key}}

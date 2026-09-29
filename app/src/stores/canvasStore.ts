@@ -81,6 +81,10 @@ let inFlightSave: Promise<void> | null = null;
 /** 有本地编辑尚未成功写到云端（运行前据此决定是否先落库，失败保持 true 以便重试） */
 let cloudSaveDirty = false;
 
+/** 本次会话已提交入队的节点 id：runNode 自动带上游时防同轮重复提交，
+ *  SSE 终态（succeeded/failed/canceled）到达时由桥接清除，之后允许再次运行。 */
+const submittedNodeRuns = new Set<string>();
+
 function scheduleCloudSave(delay = CLOUD_SAVE_DELAY) {
   if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
   cloudSaveTimer = setTimeout(() => {
@@ -165,6 +169,8 @@ export interface CanvasState {
   groupSelected: () => string | null;
   ungroupSelected: () => void;
   runNode: (id: string) => Promise<void>;
+  /** 单跑（不带上游）：供 runNode/runAll 内部调度；已在跑/已提交则跳过 */
+  runSingle: (id: string) => Promise<void>;
   /** 取消某节点最近一次排队/执行中的运行（发送按钮的停止态） */
   cancelNode: (id: string) => Promise<void>;
   runAll: () => Promise<void>;
@@ -530,8 +536,60 @@ export const useCanvasStore = create<CanvasState>()(
 
       /** M1：客户端模拟运行（M2 换成 API + SSE 流式） */
       runNode: async (id) => {
+        const s = get();
+        if (!s.nodes.some((n) => n.id === id)) return;
+
+        /* 对齐 LibTV：点下游运行 = 「运行到此处」。
+           把未就绪的上游（含间接上游）按拓扑序先提交入队，再跑自己；
+           服务端队列会等上游出产物后才执行下游（见 runQueue 等待循环）。 */
+        const upstreamIds = new Set<string>();
+        const bfs = [id];
+        while (bfs.length) {
+          const cur = bfs.shift()!;
+          for (const e of s.edges) {
+            if (e.target !== cur || upstreamIds.has(e.source)) continue;
+            upstreamIds.add(e.source);
+            bfs.push(e.source);
+          }
+        }
+        // 子图 Kahn 拓扑：入度 0（最深处）先跑
+        const indeg = new Map<string, number>();
+        const out = new Map<string, string[]>();
+        upstreamIds.forEach((n) => indeg.set(n, 0));
+        for (const e of s.edges) {
+          if (!upstreamIds.has(e.source) || !upstreamIds.has(e.target)) continue;
+          indeg.set(e.target, (indeg.get(e.target) ?? 0) + 1);
+          out.set(e.source, [...(out.get(e.source) ?? []), e.target]);
+        }
+        const ready = [...upstreamIds].filter((n) => (indeg.get(n) ?? 0) === 0);
+        const ordered: string[] = [];
+        while (ready.length) {
+          const cur = ready.shift()!;
+          ordered.push(cur);
+          for (const nxt of out.get(cur) ?? []) {
+            const d = (indeg.get(nxt) ?? 0) - 1;
+            indeg.set(nxt, d);
+            if (d === 0) ready.push(nxt);
+          }
+        }
+        // 未就绪（非 succeeded）的上游先跑；succeeded 的交给服务端 hash 幂等
+        for (const upId of ordered) {
+          const up = s.nodes.find((n) => n.id === upId);
+          if (up && (up.data as FlowNodeData).status !== "succeeded") {
+            await get().runSingle(upId);
+          }
+        }
+        await get().runSingle(id);
+      },
+
+      runSingle: async (id) => {
         const exists = get().nodes.some((n) => n.id === id);
         if (!exists) return;
+        // 防重：本次调度已提交过 / 节点正在跑（内存态）→ 跳过
+        if (submittedNodeRuns.has(id)) return;
+        const inMemory = get().nodes.find((n) => n.id === id)
+          ?.data as FlowNodeData | undefined;
+        if (inMemory?.status === "running" || inMemory?.status === "queued") return;
 
         // 关键：先把在途的编辑（提示词/参数）落库再入队。
         // 服务端是从 DB 读节点数据的，不 flush 就会拿旧 prompt 去生成。
@@ -556,6 +614,7 @@ export const useCanvasStore = create<CanvasState>()(
           }
 
           // 成功入队 → 订阅 SSE，节点状态由 runStore → 本 store 驱动
+          submittedNodeRuns.add(id);
           subscribeRun(j.runId);
         } finally {
           // 历史暂停稍后由“终态到达”解除；这里不能立即 end，否则进度会进历史。
@@ -628,9 +687,10 @@ export const useCanvasStore = create<CanvasState>()(
 
         // 全部批量入队：服务端队列在“执行时”检查上游，上游先跑完下游自然就绪。
         // 不用逐个 await（队列限并发=2，且真实耗时由后端推进）。
+        // runAll 自身已做全量拓扑，用 runSingle 避免每个节点重复带上游。
         get().beginHistoryPause();
         for (const n of ordered) {
-          await get().runNode(n.id);
+          await get().runSingle(n.id);
         }
         // 历史暂停由“最后一个节点进入终态”的桥接解除（不在这里 end）。
       },
@@ -923,6 +983,15 @@ export const useCanvasStore = create<CanvasState>()(
     // （否则 map 里其他节点的旧 output 快照会把画布上已更新的节点覆盖回去）
     if (changedId) {
       const r = map[changedId];
+      // 终态到达 → 放行该节点的下一次提交（配合 runSingle 的防重）
+      if (
+        r &&
+        (r.status === "succeeded" ||
+          r.status === "failed" ||
+          r.status === "canceled")
+      ) {
+        submittedNodeRuns.delete(changedId);
+      }
       const node = canvas.nodes.find((n) => n.id === changedId);
       if (r && node) {
         const d = node.data;

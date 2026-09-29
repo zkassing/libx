@@ -10,6 +10,7 @@ import {
   resolveNodeVariables,
 } from "@/server/queue/resolveRunInput";
 import type { VariableValues } from "@/lib/variableTypes";
+import type { FlowNodeData } from "@/types";
 
 /* ------------------------------------------------------------------ */
 /* POST /api/nodes/:id/run —— 运行单个画布节点                           */
@@ -91,6 +92,20 @@ export async function POST(_req: Request, ctx: Ctx) {
         variables: vars.values,
         upstreams: upstreams.map((u) => ({ title: u.title, kind: u.kind, summary: u.summary })),
       }),
+    },
+  });
+
+  // 3.5) 把节点的 running 态落库：下游节点执行时按 DB 状态判断上游是否就绪，
+  // 不落库的话下游会读到上一次 succeeded 的旧产物，直接拿旧输入开跑。
+  // 保留旧 output 字段（就绪判定要求 status==="succeeded"，旧产物不会误放行）。
+  await prisma.canvasNode.update({
+    where: { id: nodeId },
+    data: {
+      data: JSON.stringify({
+        ...nodeData,
+        status: "queued",
+        progress: 0,
+      } satisfies FlowNodeData),
     },
   });
 

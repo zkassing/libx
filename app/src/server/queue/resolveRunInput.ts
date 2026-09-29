@@ -66,6 +66,7 @@ export async function resolveUpstreams(workflowId: string, nodeId: string) {
 
   const upstreams: GenUpstream[] = [];
   const pending: string[] = [];
+  const pendingIds: string[] = [];
 
   for (const ur of upstreamRows) {
     let ud: FlowNodeData;
@@ -77,6 +78,7 @@ export async function resolveUpstreams(workflowId: string, nodeId: string) {
     const display = `${ud.title}${ud.index ? ` ${ud.index}` : ""}`;
     if (ud.status !== "succeeded" || !ud.output) {
       pending.push(display || ur.id);
+      pendingIds.push(ur.id);
       continue;
     }
     upstreams.push({
@@ -90,7 +92,7 @@ export async function resolveUpstreams(workflowId: string, nodeId: string) {
     });
   }
 
-  return { upstreams, pending };
+  return { upstreams, pending, pendingIds };
 }
 
 /* ------------------------------------------------------------------ */
