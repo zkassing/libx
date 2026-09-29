@@ -13,11 +13,20 @@ const MIME_TO_KIND: Record<string, string> = {
   "image/jpeg": "image",
   "image/webp": "image",
   "image/gif": "image",
+  "image/svg+xml": "image",
+  "image/avif": "image",
+  "image/heic": "image",
+  "image/heif": "image",
   "video/mp4": "video",
   "video/webm": "video",
+  "video/quicktime": "video",
   "audio/mpeg": "audio",
   "audio/wav": "audio",
   "audio/ogg": "audio",
+  "audio/mp4": "audio",
+  "audio/x-m4a": "audio",
+  "audio/aac": "audio",
+  "audio/flac": "audio",
 };
 
 export async function POST(req: Request) {

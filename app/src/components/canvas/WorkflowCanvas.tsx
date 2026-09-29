@@ -14,7 +14,7 @@ import {
   type FinalConnectionState,
   type Node,
 } from "@xyflow/react";
-import { Ban, Copy, CopyPlus, FolderDown, Group as GroupIcon, ImageDown, Star, Trash2, Ungroup } from "lucide-react";
+import { Ban, Copy, CopyPlus, FolderDown, Group as GroupIcon, ImageDown, Star, Trash2, Ungroup, Upload } from "lucide-react";
 import { nodeTypes, NODE_ICONS } from "@/components/canvas/nodes";
 import { edgeTypes } from "@/components/canvas/FlowEdge";
 import { NodeActionsBar } from "@/components/canvas/NodeActionsBar";
@@ -24,8 +24,10 @@ import { nextNodePosition } from "@/lib/placement";
 import { centerAt, reuseAsset } from "@/lib/assets";
 import {
   hasDragPayload,
+  hasFilePayload,
   readDragPayload,
 } from "@/lib/dragPayload";
+import { materializeFilesToCanvas } from "@/lib/uploadFiles";
 import { loadToolboxToCanvas } from "@/lib/toolboxGraph";
 import { useCanvasStore } from "@/stores/canvasStore";
 import { useCanvasPrefs } from "@/stores/canvasPrefs";
@@ -83,9 +85,12 @@ interface MenuState {
 function ContextMenu({
   menu,
   onClose,
+  onUpload,
 }: {
   menu: MenuState;
   onClose: () => void;
+  /** 「上传素材…」：主组件持有隐藏文件框（菜单关闭后选择仍有效） */
+  onUpload: () => void;
 }) {
   const duplicateNode = useCanvasStore((s) => s.duplicateNode);
   const removeNode = useCanvasStore((s) => s.removeNode);
@@ -147,22 +152,25 @@ function ContextMenu({
           { label: "解组", icon: Ungroup, run: () => ungroupSelected() },
           { label: "删除节点", icon: Trash2, run: () => removeNode(menu.nodeId!) },
         ]
-      : NODE_KINDS.map((kind) => ({
-          label: `添加${NODE_META[kind].label}节点`,
-          icon: NODE_ICONS[kind],
-          run: () => {
-            const store = useCanvasStore.getState();
-            const id = store.addNode(kind, menu.flow);
-            if (menu.pendingFrom) {
-              store.onConnect({
-                source: menu.pendingFrom.nodeId,
-                target: id,
-                sourceHandle: menu.pendingFrom.handleId,
-                targetHandle: null,
-              });
-            }
-          },
-        }));
+      : [
+          { label: "上传素材…", icon: Upload, run: onUpload },
+          ...NODE_KINDS.map((kind) => ({
+            label: `添加${NODE_META[kind].label}节点`,
+            icon: NODE_ICONS[kind],
+            run: () => {
+              const store = useCanvasStore.getState();
+              const id = store.addNode(kind, menu.flow);
+              if (menu.pendingFrom) {
+                store.onConnect({
+                  source: menu.pendingFrom.nodeId,
+                  target: id,
+                  sourceHandle: menu.pendingFrom.handleId,
+                  targetHandle: null,
+                });
+              }
+            },
+          })),
+        ];
 
   const rating = nodeData?.rating ?? 0;
 
@@ -349,6 +357,23 @@ export function WorkflowCanvas() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [groupSelected, ungroupSelected, undo, redo, rfInstance]);
 
+  /** 粘贴：剪贴板里的图片/文件直接落成素材节点（对齐 LibTV ⌘V） */
+  React.useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (isTextEntry(e.target)) return;
+      const files = Array.from(e.clipboardData?.files ?? []);
+      if (!files.length) return;
+      e.preventDefault();
+      const at = screenToFlowPosition({
+        x: window.innerWidth / 2,
+        y: window.innerHeight / 2,
+      });
+      void materializeFilesToCanvas(files, at);
+    };
+    window.addEventListener("paste", onPaste, true);
+    return () => window.removeEventListener("paste", onPaste, true);
+  }, [screenToFlowPosition]);
+
   /** V / P：在「选择模式（框选）」与「平移模式」之间切换；Tab：新建节点菜单；⌥⇧F：整理画布 */
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -454,8 +479,11 @@ export function WorkflowCanvas() {
     [onConnect, screenToFlowPosition, setConnectingFrom],
   );
 
-  /* ---- 拖拽放置：侧栏 → 画布 ---- */
-  const [dropping, setDropping] = React.useState(false);
+  /* ---- 拖拽放置：侧栏 → 画布；桌面文件 → 画布（上传） ---- */
+  const [dropping, setDropping] = React.useState<"place" | "upload" | null>(null);
+  /** 「上传素材…」的落点（打开菜单时的 flow 坐标）与隐藏文件框 */
+  const uploadInputRef = React.useRef<HTMLInputElement>(null);
+  const uploadAtRef = React.useRef({ x: 0, y: 0 });
   const dropAt = React.useCallback(
     (e: React.DragEvent) =>
       screenToFlowPosition({ x: e.clientX, y: e.clientY }),
@@ -467,17 +495,17 @@ export function WorkflowCanvas() {
     // preventDefault 才会接受放置；dropEffect 决定光标样式
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
-    setDropping(true);
+    setDropping(hasFilePayload(e.dataTransfer) ? "upload" : "place");
   }, []);
 
-  const handleDragLeave = React.useCallback(() => setDropping(false), []);
+  const handleDragLeave = React.useCallback(() => setDropping(null), []);
 
   /**
    * 拖拽被中断时（按 Esc 取消、拖到窗口外、拖回侧栏再松手）也把提示收起来，
    * 否则 dragleave 可能不触发，提示会一直挂在画布上。
    */
   React.useEffect(() => {
-    const reset = () => setDropping(false);
+    const reset = () => setDropping(null);
     window.addEventListener("dragend", reset);
     window.addEventListener("drop", reset);
     window.addEventListener("blur", reset);
@@ -490,7 +518,14 @@ export function WorkflowCanvas() {
 
   const handleDrop = React.useCallback(
     (e: React.DragEvent) => {
-      setDropping(false);
+      setDropping(null);
+      // 1) OS 拖来的本地文件：上传为素材节点（LibTV 拖图进画布）
+      if (hasFilePayload(e.dataTransfer) && e.dataTransfer.files.length) {
+        e.preventDefault();
+        const at = dropAt(e);
+        void materializeFilesToCanvas(Array.from(e.dataTransfer.files), at);
+        return;
+      }
       const payload = readDragPayload(e.dataTransfer);
       if (!payload) return;
       e.preventDefault();
@@ -656,7 +691,30 @@ export function WorkflowCanvas() {
       </ReactFlow>
 
       {nodes.length === 0 && <EmptyState onPick={addAtCenter} />}
-      {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+      {menu && (
+        <ContextMenu
+          menu={menu}
+          onClose={() => setMenu(null)}
+          onUpload={() => {
+            uploadAtRef.current = menu.flow;
+            uploadInputRef.current?.click();
+          }}
+        />
+      )}
+      {/* 「上传素材…」的隐藏文件框（放在主组件，菜单关闭后选择仍有效） */}
+      <input
+        ref={uploadInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          if (files.length) {
+            void materializeFilesToCanvas(files, uploadAtRef.current);
+          }
+          e.target.value = "";
+        }}
+      />
       {/* 选中带产物的图片节点时：顶部工具条（高清派生 / 下载 / 全屏） */}
       <NodeActionsBar />
 

@@ -42,7 +42,15 @@ export function setDragPayload(
 /** dragover 阶段只能看 types，不能读数据 */
 export function hasDragPayload(dt: DataTransfer | null): boolean {
   if (!dt) return false;
+  // 桌面/访达拖来的本地文件（Files type）也算可放置
+  if (dt.types.includes("Files")) return true;
   return Object.values(DRAG_MIME).some((m) => dt.types.includes(m));
+}
+
+/** 是否为 OS 拖来的本地文件（区别于应用内自定义 payload） */
+export function hasFilePayload(dt: DataTransfer | null): boolean {
+  if (!dt) return false;
+  return dt.types.includes("Files") && !Object.values(DRAG_MIME).some((m) => dt.types.includes(m));
 }
 
 /** drop 阶段才能读数据 */
