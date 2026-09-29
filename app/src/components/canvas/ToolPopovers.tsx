@@ -728,11 +728,12 @@ function MarkingBody({
 import {
   ASPECT_RATIOS,
   displayNodeTitle,
-  DURATIONS,
   IMAGE_BACKGROUNDS,
   IMAGE_QUALITIES,
   IMAGE_RESOLUTIONS,
   RESOLUTIONS,
+  VIDEO_ASPECT_RATIOS,
+  VIDEO_DURATIONS,
 } from "@/lib/nodeTypes";
 import type { NodeParams } from "@/types";
 
@@ -861,17 +862,19 @@ export function ImageParamsPopover({
   );
 }
 
-/** 比例宫格（图片/视频参数弹层共用） */
+/** 比例宫格（图片/视频参数弹层共用；ratios 可传视频白名单子集） */
 function RatioGrid({
   value,
   onPick,
+  ratios = ASPECT_RATIOS,
 }: {
   value: string;
   onPick: (r: string) => void;
+  ratios?: string[];
 }) {
   return (
     <div className="grid grid-cols-5 gap-1">
-      {ASPECT_RATIOS.map((r) => (
+      {ratios.map((r) => (
         <button
           key={r}
           onClick={() => onPick(r)}
@@ -920,7 +923,11 @@ export function VideoParamsPopover({
     <div className={cn(panelCls, "w-[336px]", className)}>
       <div className="max-h-[420px] overflow-y-auto pb-2.5">
         <ParamSection label="比例">
-          <RatioGrid value={ratio} onPick={(r) => onChange({ aspectRatio: r })} />
+          <RatioGrid
+            value={ratio}
+            ratios={VIDEO_ASPECT_RATIOS}
+            onPick={(r) => onChange({ aspectRatio: r })}
+          />
         </ParamSection>
         <ParamSection label="清晰度">
           <div className="flex gap-1">
@@ -937,7 +944,7 @@ export function VideoParamsPopover({
         </ParamSection>
         <ParamSection label="时长">
           <div className="flex gap-1">
-            {DURATIONS.map((d) => (
+            {VIDEO_DURATIONS.map((d) => (
               <button
                 key={d}
                 onClick={() => onChange({ duration: d })}

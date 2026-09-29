@@ -129,3 +129,8 @@ export const IMAGE_QUALITIES = ["低画质", "标准画质", "高画质", "超�
 /** 背景处理（LibTV 参数弹层） */
 export const IMAGE_BACKGROUNDS = ["自动", "保留背景", "透明背景"];
 export const DURATIONS = [3, 5, 10, 15];
+
+/* Seedance 1.0 实际支持的档位（UI 只给这些，provider 再 clamp 兼底老数据） */
+export const VIDEO_ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
+export const VIDEO_DURATIONS = [5, 10];
+export const VIDEO_MAX_COUNT = 4;

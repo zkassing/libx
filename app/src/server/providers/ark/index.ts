@@ -313,6 +313,25 @@ function normalizeVideoDuration(seconds: number): number {
   );
 }
 
+/** Seedance 支持的比例白名单；老数据里的其他比例按宽高比数值就近吸附 */
+const SEEDANCE_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
+function normalizeVideoRatio(raw: unknown): string {
+  const s = String(raw ?? "16:9");
+  if (SEEDANCE_RATIOS.includes(s)) return s;
+  const m = /^(\d+(?:\.\d+)?)\s*[:：]\s*(\d+(?:\.\d+)?)$/.exec(s);
+  if (!m) return "16:9";
+  const val = Number(m[1]) / Number(m[2]);
+  const valueOf = (r: string) => {
+    const [w, h] = r.split(":").map(Number);
+    return w / h;
+  };
+  return SEEDANCE_RATIOS.reduce((best, cur) =>
+    Math.abs(Math.log(val / valueOf(cur))) < Math.abs(Math.log(val / valueOf(best)))
+      ? cur
+      : best,
+  );
+}
+
 /** 画布分辨率 → Seedance 的 --resolution 取值 */
 function normalizeResolution(raw: unknown): string {
   const s = String(raw ?? "720P").toUpperCase().replace(/P$/, "p");
@@ -321,6 +340,37 @@ function normalizeResolution(raw: unknown): string {
 
 const VIDEO_POLL_MS = 5000;
 
+/** 单条视频任务：提交 → 轮询 → 落盘，返回本地 URL */
+async function runOneVideoTask(
+  model: string,
+  content: Array<Record<string, unknown>>,
+  onTick: (p: number) => void,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  const taskId = await arkCreateVideoTask(model, content as never, signal);
+  // 轮询到终态。进度是估的（ARK 不给百分比），所以封顶 90，把 100 留给落盘完成
+  let progress = 10;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, VIDEO_POLL_MS));
+    throwIfAborted(signal);
+
+    const task = await arkGetVideoTask(taskId, signal);
+
+    if (task.status === "succeeded") {
+      if (!task.videoUrl) throw new Error("ARK 视频任务成功但未返回视频地址");
+      const local = await persistRemoteMedia(task.videoUrl, "video", signal);
+      return local;
+    }
+
+    if (task.status === "failed") {
+      throw new Error(`视频生成失败：${task.error ?? "厂商未给出原因"}`);
+    }
+
+    progress = Math.min(90, progress + 5);
+    onTick(progress);
+  }
+}
+
 export const arkVideoProvider: GenProvider = {
   name: "ark-video",
   kind: "video",
@@ -328,17 +378,13 @@ export const arkVideoProvider: GenProvider = {
   costEstimate: () => 135,
   async generate(input: GenInput, ctx: GenContext): Promise<GenResult> {
     const model = resolveArkModel(input.nodeKind, String(input.params?.model ?? ""));
-    const ratio = String(input.params?.aspectRatio ?? "16:9");
+    const ratio = normalizeVideoRatio(input.params?.aspectRatio);
     const duration = normalizeVideoDuration(Number(input.params?.duration) || 5);
     const resolution = normalizeResolution(input.params?.resolution);
+    const count = Math.min(4, Math.max(1, Number(input.params?.count) || 1));
 
     const digest = upstreamDigest(input);
     const base = [input.prompt || input.title, digest].filter(Boolean).join("\n\n");
-
-    // Seedance 的参数是拼在提示词尾巴上的文本指令，不是独立字段
-    const text = `${base} --ratio ${ratio} --duration ${duration} --resolution ${resolution}`;
-
-    const content: Array<Record<string, unknown>> = [{ type: "text", text }];
 
     // 图生视频：把上游已就绪的图片当首帧（文生视频则不加）；
     // 没有连线上游图时，退而取 `@引用` 的第一张参考图
@@ -346,53 +392,58 @@ export const arkVideoProvider: GenProvider = {
       .filter((u) => u.kind === "image")
       .flatMap((u) => u.urls ?? [])[0];
     const upstreamImage = edgeImage ?? input.referenceImages?.[0];
+    // 首尾帧：首帧来自连线时尾帧取引用图第一张，否则取第二张
+    const lastImage = edgeImage
+      ? input.referenceImages?.[0]
+      : input.referenceImages?.[1];
+
+    const imageParts: Array<Record<string, unknown>> = [];
     if (upstreamImage) {
-      content.push({
+      imageParts.push({
         type: "image_url",
         // 本地产物转 base64 内联，方舟回源不到 localhost
         image_url: { url: await toArkImageRef(upstreamImage) },
         role: "first_frame",
       });
     }
-    // 首尾帧：首帧来自连线时尾帧取引用图第一张，否则取第二张
-    const lastImage = edgeImage
-      ? input.referenceImages?.[0]
-      : input.referenceImages?.[1];
     if (lastImage) {
-      content.push({
+      imageParts.push({
         type: "image_url",
         image_url: { url: await toArkImageRef(lastImage) },
         role: "last_frame",
       });
     }
 
-    ctx.onProgress?.(5);
+    ctx.onProgress?.(2);
     throwIfAborted(ctx.signal);
 
-    const taskId = await arkCreateVideoTask(model, content as never, ctx.signal);
-
-    // 轮询到终态。进度是估的（ARK 不给百分比），所以封顶 90，把 100 留给落盘完成
-    let progress = 10;
-    for (;;) {
-      await new Promise((r) => setTimeout(r, VIDEO_POLL_MS));
+    const all: string[] = [];
+    for (let i = 0; i < count; i += 1) {
       throwIfAborted(ctx.signal);
+      // Seedance 的参数是拼在提示词尾巴上的文本指令，不是独立字段
+      const varied =
+        count > 1
+          ? `${base}\n\n（第 ${i + 1} 条，共 ${count} 条，镜头运动与构图需明显不同）`
+          : base;
+      const text = `${varied} --ratio ${ratio} --duration ${duration} --resolution ${resolution}`;
+      const content: Array<Record<string, unknown>> = [
+        { type: "text", text },
+        ...imageParts,
+      ];
 
-      const task = await arkGetVideoTask(taskId, ctx.signal);
-
-      if (task.status === "succeeded") {
-        if (!task.videoUrl) throw new Error("ARK 视频任务成功但未返回视频地址");
-        ctx.onProgress?.(92);
-        const local = await persistRemoteMedia(task.videoUrl, "video", ctx.signal);
-        ctx.onProgress?.(100);
-        return { kind: input.nodeKind, urls: [local] };
-      }
-
-      if (task.status === "failed") {
-        throw new Error(`视频生成失败：${task.error ?? "厂商未给出原因"}`);
-      }
-
-      progress = Math.min(90, progress + 5);
-      ctx.onProgress?.(progress);
+      // 每条占 [i/N, (i+1)/N] 的进度切片（条内轮询最多推进到 90）
+      const sliceBase = Math.round((i / count) * 100);
+      const sliceSpan = 100 / count;
+      const local = await runOneVideoTask(
+        model,
+        content,
+        (p) => ctx.onProgress?.(Math.round(sliceBase + (p / 100) * sliceSpan)),
+        ctx.signal,
+      );
+      all.push(local);
+      ctx.onProgress?.(Math.round(((i + 1) / count) * 100));
     }
+
+    return { kind: input.nodeKind, urls: all };
   },
 };

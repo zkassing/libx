@@ -141,24 +141,27 @@ function makeProvider(
 
       const seed = input.nodeId.slice(-6);
       const color = NODE_META[input.nodeKind]?.accent ?? "#8b5cf6";
+      const count = Math.min(4, Math.max(1, Number(input.params?.count) || 1));
 
       // video：优先给真实可播放 MP4（P5 顺序连播依赖 onEnded），失败回退 SVG
       if (input.nodeKind === "video") {
         const wanted = Number(input.params?.duration) ?? 2;
         const clipUrl = await getMockClipUrl(color, wanted);
-        if (clipUrl) return { kind: input.nodeKind, urls: [clipUrl] };
+        if (clipUrl) {
+          return { kind: input.nodeKind, urls: Array.from({ length: count }, () => clipUrl) };
+        }
       }
 
       return {
         kind: input.nodeKind,
-        urls: [
+        urls: Array.from({ length: count }, (_, i) =>
           mockAsset(
             input.nodeKind,
-            seed,
+            `${seed}${i}`,
             input.prompt || input.title,
             input.upstreams?.map((u) => u.title),
           ),
-        ],
+        ),
       };
     },
   };
