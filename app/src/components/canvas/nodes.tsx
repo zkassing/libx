@@ -547,7 +547,13 @@ function MergedImageParams({
       >
         <ImageParamsPopover
           params={params}
-          onChange={(patch) => updateNodeParams(id, patch)}
+          onChange={(patch) =>
+            updateNodeParams(id, {
+              ...patch,
+              // 用户显式选过比例后，AutoLink 不再用上游契约覆盖
+              ...(patch.aspectRatio ? { ratioLocked: true } : {}),
+            })
+          }
         />
       </PopoverContent>
     </Popover>
@@ -689,7 +695,9 @@ function NodeEditorDialog({
               <Field label="比例">
                 <Select
                   value={p.aspectRatio ?? ""}
-                  onValueChange={(v) => updateNodeParams(id, { aspectRatio: v })}
+                  onValueChange={(v) =>
+                    updateNodeParams(id, { aspectRatio: v, ratioLocked: true })
+                  }
                 >
                   <SelectTrigger size="sm" className="w-full">
                     <SelectValue placeholder="比例" />
@@ -1082,7 +1090,9 @@ function Composer({
           <ChipSelect
             value={p.aspectRatio}
             options={ASPECT_RATIOS}
-            onChange={(v) => updateNodeParams(id, { aspectRatio: v })}
+            onChange={(v) =>
+              updateNodeParams(id, { aspectRatio: v, ratioLocked: true })
+            }
           />
         )}
         {showResolution && (

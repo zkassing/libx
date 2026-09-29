@@ -68,15 +68,16 @@ export function applyAutoLink(
     };
   }
 
-  // 用户没写提示词：契约接管提示词与比例建议（取第一个给出比例的契约）
+  // 用户没写提示词：契约接管提示词；比例建议仅在用户未显式选择时跟随（ratioLocked）
   const ratio = hits
     .map((h) => h.supplementary?.aspect_ratio)
     .find((r): r is string => typeof r === "string" && !!r.trim());
+  const locked = (params as { ratioLocked?: boolean } | undefined)?.ratioLocked;
   return {
     prompt: merged,
     params: {
       ...params,
-      ...(ratio ? { aspectRatio: ratio.trim() } : {}),
+      ...(ratio && !locked ? { aspectRatio: ratio.trim() } : {}),
     },
     linked: true,
     action: hits[0].action,

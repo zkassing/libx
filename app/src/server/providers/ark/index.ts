@@ -27,6 +27,33 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 }
 
+/**
+ * 模拟进度 ticker：单次 ARK 调用（10-40s）没有真实中间进度，
+ * 用缓动曲线从 start 逼近 cap，任务完成后由调用方打 100%。
+ * 曲线 1-e^(-2.2t)：起步快（LibTV 的百分比也是“先快后慢”）。
+ */
+async function withProgress<T>(
+  task: Promise<T>,
+  onProgress: ((p: number) => void) | undefined,
+  start: number,
+  cap: number,
+  expectedMs = 26000,
+): Promise<T> {
+  if (!onProgress || cap <= start) return task;
+  const t0 = Date.now();
+  onProgress(start);
+  const timer = setInterval(() => {
+    const t = (Date.now() - t0) / expectedMs;
+    const p = start + (cap - start) * (1 - Math.exp(-2.2 * t));
+    onProgress(Math.min(cap, Math.round(p)));
+  }, 700);
+  try {
+    return await task;
+  } finally {
+    clearInterval(timer);
+  }
+}
+
 /** 尽力从模型输出里抠出 JSON（模型偶尔会包一层 ```json 或加句开场白） */
 function extractJson(raw: string): unknown {
   const trimmed = raw.trim();
@@ -122,13 +149,19 @@ export const arkTextProvider: GenProvider = {
     ctx.onProgress?.(10);
     throwIfAborted(ctx.signal);
 
-    const raw = await arkChat(
-      model,
-      [
-        { role: "system", content: SHOT_SYSTEM_PROMPT },
-        { role: "user", content: userPrompt },
-      ],
-      { signal: ctx.signal, json: true, maxTokens: 3000 },
+    const raw = await withProgress(
+      arkChat(
+        model,
+        [
+          { role: "system", content: SHOT_SYSTEM_PROMPT },
+          { role: "user", content: userPrompt },
+        ],
+        { signal: ctx.signal, json: true, maxTokens: 3000 },
+      ),
+      ctx.onProgress,
+      10,
+      72,
+      18000,
     );
 
     ctx.onProgress?.(75);
@@ -244,12 +277,20 @@ export const arkImageProvider: GenProvider = {
       const prompt =
         count > 1 ? `${base}\n\n（第 ${i + 1} 张，共 ${count} 张，构图与视角需明显不同）` : base;
 
-      const urls = await arkImage(model, prompt, {
-        size: scaleSize(RATIO_SIZE[ratio] ?? RATIO_SIZE["16:9"], resolution),
-        // `@引用` 的参考图（被引用节点产物 / 标记图 / 角色参考图）→ 图生图
-        referenceImages: input.referenceImages,
-        signal: ctx.signal,
-      });
+      // 每张占 [i/N, (i+1)/N] 的进度切片，片内 8%→92% 缓动推进
+      const sliceStart = Math.round((i / count) * 100);
+      const sliceCap = Math.round(((i + 1) / count) * 100) - 8;
+      const urls = await withProgress(
+        arkImage(model, prompt, {
+          size: scaleSize(RATIO_SIZE[ratio] ?? RATIO_SIZE["16:9"], resolution),
+          // `@引用` 的参考图（被引用节点产物 / 标记图 / 角色参考图）→ 图生图
+          referenceImages: input.referenceImages,
+          signal: ctx.signal,
+        }),
+        ctx.onProgress,
+        sliceStart,
+        Math.max(sliceStart + 1, sliceCap),
+      );
 
       // 立刻落盘：ARK 给的是 24 小时后过期的签名 URL
       all.push(...(await persistAllRemote(urls.slice(0, 1), "image", ctx.signal)));

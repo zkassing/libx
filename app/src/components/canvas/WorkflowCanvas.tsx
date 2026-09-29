@@ -297,6 +297,17 @@ export function WorkflowCanvas() {
       if (!meta) return;
       const k = e.key.toLowerCase();
 
+      // ⌘Enter：运行选中节点（对齐 LibTV「生成」）。
+      // 放在 isTextEntry 之前：输入框里 ⌘Enter 也是发送，LibTV 用户习惯如此。
+      if (e.key === "Enter") {
+        const id = useCanvasStore.getState().selectedNodeId;
+        if (id) {
+          e.preventDefault();
+          void useCanvasStore.getState().runNode(id);
+        }
+        return;
+      }
+
       // 输入框/文本框里交给浏览器原生撤销，不要抢
       if (isTextEntry(e.target)) return;
 
@@ -317,15 +328,6 @@ export function WorkflowCanvas() {
         else groupSelected();
         return;
       }
-      // ⌘Enter：运行选中节点（对齐 LibTV「生成」）
-      if (e.key === "Enter") {
-        const id = useCanvasStore.getState().selectedNodeId;
-        if (id) {
-          e.preventDefault();
-          void useCanvasStore.getState().runNode(id);
-        }
-        return;
-      }
       // ⌘D：创建副本（对齐 LibTV；覆盖浏览器收藏）
       if (k === "d") {
         const id = useCanvasStore.getState().selectedNodeId;
@@ -341,8 +343,10 @@ export function WorkflowCanvas() {
         void rfInstance.fitView({ padding: 0.2, duration: 300 });
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // 捕获阶段监听：RF 会在节点 wrapper 上把 Enter 等键 stopPropagation
+    //（a11y：Enter=选中），冒泡阶段的 window 监听根本收不到。
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [groupSelected, ungroupSelected, undo, redo, rfInstance]);
 
   /** V / P：在「选择模式（框选）」与「平移模式」之间切换；Tab：新建节点菜单；⌥⇧F：整理画布 */
@@ -373,8 +377,8 @@ export function WorkflowCanvas() {
       if (k === "v") useCanvasPrefs.getState().setSelectMode(true);
       else if (k === "p") useCanvasPrefs.getState().setSelectMode(false);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [screenToFlowPosition]);
 
   const addAtCenter = React.useCallback(

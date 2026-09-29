@@ -71,6 +71,14 @@ console.log("== applyAutoLink 规则 ==");
   assert(r.linked && r.prompt === ACTION.action_input, "视频节点：纯空格视为空提示词并被接管");
 }
 
+// 3.5) 用户在 UI 显式选过比例（ratioLocked）→ 契约比例不再覆盖
+{
+  const r = applyAutoLink("image", "", { aspectRatio: "1:1", ratioLocked: true }, [upstreamWithAction]);
+  assert(r.linked, "ratioLocked：linked=true");
+  assert(r.prompt === ACTION.action_input, "ratioLocked：提示词仍被接管");
+  assert(r.params?.aspectRatio === "1:1", "ratioLocked：用户比例不被契约覆盖");
+}
+
 // 4) 文本节点不消费契约（原链路走摘要上下文）
 {
   const r = applyAutoLink("text", "", {}, [upstreamWithAction]);

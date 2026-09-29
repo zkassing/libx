@@ -63,6 +63,7 @@ export function NodeActionsBar() {
       model: data.params?.model,
       mode: "图生图",
       aspectRatio: data.params?.aspectRatio,
+      ratioLocked: true,
       resolution,
       quality: "高画质",
     });

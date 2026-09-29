@@ -329,6 +329,8 @@ export function useMention({
     // 按 Enter 确认中文时会变成“@了一个东西”，中文根本打不进去。
     // keyCode 229 = 输入法正在组字（老浏览器/部分 IME 拿不到 isComposing 时的兜底）。
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    // ⌘/Ctrl+Enter 是全局「运行节点」快捷键，不要当成 mention 确认
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") return;
 
     if (query === null || flat.length === 0) return;
     if (e.key === "ArrowDown") {

@@ -15,6 +15,8 @@ export interface NodeParams {
   /** 生成模式，如 文生视频 / 图生视频 / 首尾帧 */
   mode?: string;
   aspectRatio?: string;
+  /** 用户在 UI 里显式选过比例后置 true：AutoLink 不再用上游契约覆盖 */
+  ratioLocked?: boolean;
   resolution?: string;
   /** 画质档位（LibTV 图片参数：低/标准/高/超高/极致） */
   quality?: string;
