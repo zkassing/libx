@@ -89,11 +89,22 @@ function scheduleCloudSave(delay = CLOUD_SAVE_DELAY) {
   if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
   cloudSaveTimer = setTimeout(() => {
     cloudSaveTimer = null;
-    // 动态读取最新 store（避免循环依赖：store 已在此文件内创建）
-    inFlightSave = useCanvasStore.getState().saveToCloud();
-    void inFlightSave.finally(() => {
-      inFlightSave = null;
-    });
+    const go = () => {
+      inFlightSave = useCanvasStore.getState().saveToCloud();
+      void inFlightSave.finally(() => {
+        inFlightSave = null;
+      });
+    };
+    // 保存串行：在途保存完成后再发下一个。
+    // PUT 是全量替换——并发时旧快照后到达会把新节点/新编辑从 DB 抹掉，
+    // 表现就是「刚上传/刚建的节点，运行时 404 节点不存在」。
+    if (inFlightSave) {
+      void inFlightSave.finally(() => {
+        if (!cloudSaveTimer) go();
+      });
+    } else {
+      go();
+    }
   }, delay);
 }
 
@@ -103,6 +114,8 @@ async function flushPendingCloudSave() {
     clearTimeout(cloudSaveTimer);
     cloudSaveTimer = null;
   }
+  // 先等在途（旧快照先落），再发当前快照——顺序反了同样是旧盖新
+  if (inFlightSave) await inFlightSave;
   if (cloudSaveDirty) {
     await useCanvasStore.getState().saveToCloud();
   }
@@ -603,24 +616,36 @@ export const useCanvasStore = create<CanvasState>()(
         // 生成过程中的 status/progress/output 不进历史栈（撤销不应回退产物）
         get().beginHistoryPause();
         try {
-          const res = await fetch(`/api/nodes/${id}/run`, { method: "POST" });
-          let j: { runId?: string; error?: string };
-          try {
-            j = await res.json();
-          } catch {
-            set({ connectionError: "运行请求失败，请稍后重试" });
+          // 「节点不存在」防御：万一落库仍有竞态（极端时序/其他客户端），
+          // 强制 flush 一次后重试——而不是直接把错误甩给用户。
+          let attempt = 0;
+          for (;;) {
+            attempt += 1;
+            const res = await fetch(`/api/nodes/${id}/run`, { method: "POST" });
+            let j: { runId?: string; error?: string };
+            try {
+              j = await res.json();
+            } catch {
+              set({ connectionError: "运行请求失败，请稍后重试" });
+              return;
+            }
+
+            if (res.status === 404 && attempt === 1) {
+              await flushPendingCloudSave();
+              continue;
+            }
+
+            // 上游未就绪 / 无权限等业务错误（409/403/404）：展示并中止
+            if (!res.ok || !j.runId) {
+              set({ connectionError: j.error ?? "运行失败" });
+              return;
+            }
+
+            // 成功入队 → 订阅 SSE，节点状态由 runStore → 本 store 驱动
+            submittedNodeRuns.add(id);
+            subscribeRun(j.runId);
             return;
           }
-
-          // 上游未就绪 / 无权限等业务错误（409/403/404）：展示并中止
-          if (!res.ok || !j.runId) {
-            set({ connectionError: j.error ?? "运行失败" });
-            return;
-          }
-
-          // 成功入队 → 订阅 SSE，节点状态由 runStore → 本 store 驱动
-          submittedNodeRuns.add(id);
-          subscribeRun(j.runId);
         } finally {
           // 历史暂停稍后由“终态到达”解除；这里不能立即 end，否则进度会进历史。
           // 终态同步 effect 中统一 endHistoryPause。
@@ -896,6 +921,9 @@ export const useCanvasStore = create<CanvasState>()(
   saveToCloud: async () => {
         const s = get();
         if (!s.workflowId) return;
+        // 乐观清脏：本次快照覆盖到此为止的编辑，保存期间的新编辑会重新置脏。
+        // （成功后清会吞掉飞行期间产生的新编辑标记）
+        cloudSaveDirty = false;
         set({ cloudStatus: "saving", cloudError: null });
         try {
           const res = await fetch(`/api/workflows/${s.workflowId}`, {
@@ -908,9 +936,10 @@ export const useCanvasStore = create<CanvasState>()(
           });
           if (!res.ok) throw new Error(`保存失败 (${res.status})`);
           const data = (await res.json()) as { savedAt: string };
-          cloudSaveDirty = false;
           set({ cloudStatus: "saved", savedAt: data.savedAt });
         } catch (e) {
+          // 失败恢复脏标记：下一次 schedule/flush 会重试
+          cloudSaveDirty = true;
           set({
             cloudStatus: "error",
             cloudError: e instanceof Error ? e.message : "保存失败",
