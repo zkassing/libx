@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI 教学工作流平台",
-  description: "基于无限画布与节点工作流的 AI 内容生成教学平台",
+  title: "墨点 MoDot",
+  description: "一滴墨落在画布上——基于无限画布与节点工作流的 AI 内容生成工具",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

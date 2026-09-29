@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
-import { Loader2, GraduationCap, Mail, Lock, User } from "lucide-react";
+import { Loader2, Droplet, Mail, Lock, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -68,10 +68,10 @@ export default function LoginPage() {
           className="mb-8 flex items-center justify-center gap-2.5 text-white"
         >
           <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-white">
-            <GraduationCap className="size-5" />
+            <Droplet className="size-5" />
           </span>
           <span className="text-[17px] font-medium tracking-tight">
-            AI 教学画布
+            墨点 MoDot
           </span>
         </Link>
 

@@ -385,9 +385,11 @@ function IconRail({
 }
 
 function LogoMark() {
+  // 墨点：一滴墨 + 溅开的卫星点
   return (
-    <svg width="22" height="16" viewBox="0 0 22 16" fill="none" aria-hidden>
-      <path d="M2 13V3l8 6 4-3 6 4" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      <circle cx="8" cy="10.5" r="5" fill="#fff" />
+      <circle cx="14.6" cy="4.4" r="1.7" fill="#fff" />
     </svg>
   );
 }

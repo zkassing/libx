@@ -31,10 +31,14 @@ export function GlobalNav({ onNewProject }: { onNewProject: () => void }) {
     <nav className="flex h-full w-[208px] shrink-0 flex-col border-r border-white/8 bg-[#17171a] px-3 py-4">
       {/* Logo */}
       <div className="mb-5 flex items-center gap-2 px-2">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[#1677ff] text-[15px] font-bold text-white">
-          AI
+        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[#1677ff] text-white">
+          {/* 墨点 */}
+          <svg width="15" height="15" viewBox="0 0 18 18" fill="none" aria-hidden>
+            <circle cx="8" cy="10.5" r="5" fill="#fff" />
+            <circle cx="14.6" cy="4.4" r="1.7" fill="#fff" />
+          </svg>
         </div>
-        <span className="text-[15px] font-semibold tracking-wide text-white">AI 创作台</span>
+        <span className="text-[15px] font-semibold tracking-wide text-white">墨点 MoDot</span>
       </div>
 
       {/* 新建 */}

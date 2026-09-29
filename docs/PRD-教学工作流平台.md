@@ -1,4 +1,4 @@
-# PRD：AI 教学工作流平台（类 LibTV 工作区 + 教学引导）
+# PRD：墨点 MoDot（类 LibTV 工作区 + 教学引导）
 
 > 版本 v0.1 ｜ 状态：待评审 ｜ 调研方式：browser-use 实地操作 LibTV（liblib.tv）+ 官方文档
 > 调研截图：`D:/Project/_shots/`
