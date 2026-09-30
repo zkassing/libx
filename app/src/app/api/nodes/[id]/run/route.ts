@@ -77,6 +77,10 @@ export async function POST(_req: Request, ctx: Ctx) {
   const cost = provider.costEstimate(genInput);
 
   // 3) 创建 NodeRun(queued)
+  // 用户主动点击运行 = 意图要新产物，?force=1 跳过同输入缓存复用。
+  // （否则同样 prompt 再点一次，画布闪一下还是旧图，用户以为「不能重新生成」）
+  const force = new URL(_req.url).searchParams.get("force") === "1";
+
   const run = await prisma.nodeRun.create({
     data: {
       nodeId,
@@ -90,6 +94,7 @@ export async function POST(_req: Request, ctx: Ctx) {
         renderedPrompt: vars.prompt,
         params: nodeData.params,
         variables: vars.values,
+        force,
         upstreams: upstreams.map((u) => ({ title: u.title, kind: u.kind, summary: u.summary })),
       }),
     },

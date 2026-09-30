@@ -1143,8 +1143,9 @@ function Composer({
       </div>
       <RefChips id={id} data={data} />
 
-      {/* 参数行 */}
-      <div className="flex items-center gap-1 px-2 pt-1.5 pb-2">
+      {/* 参数行：flex-wrap 兼容视频等参数较多的节点
+          （模型+合并参数+模式+右侧按钮超过编辑器 520px 宽时换行不溢出） */}
+      <div className="flex flex-wrap items-center gap-1 px-2 pt-1.5 pb-2">
         <ChipSelect
           value={p.model}
           options={meta.models}

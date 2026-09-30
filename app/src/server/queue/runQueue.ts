@@ -274,14 +274,26 @@ function createQueue(): RunQueue {
         referenceImages: refRes.referenceImages,
       });
 
-      const cached = await prisma.nodeRun.findFirst({
-        where: {
-          nodeId,
-          status: "succeeded",
-          inputHash,
-        },
-        orderBy: { createdAt: "desc" },
-      });
+      // 用户主动运行（force）跳过缓存：要的是新产物，不是复用旧图
+      const forceRun = (() => {
+        try {
+          const snap = run.input ? JSON.parse(run.input) as { force?: boolean } : null;
+          return snap?.force === true;
+        } catch {
+          return false;
+        }
+      })();
+
+      const cached = forceRun
+        ? null
+        : await prisma.nodeRun.findFirst({
+            where: {
+              nodeId,
+              status: "succeeded",
+              inputHash,
+            },
+            orderBy: { createdAt: "desc" },
+          });
 
       if (cached?.output) {
         const cachedResult = JSON.parse(cached.output) as GenResult;
@@ -375,7 +387,9 @@ function createQueue(): RunQueue {
             finishedAt,
           },
         }),
-        prisma.canvasNode.update({
+        // updateMany：运行期间节点被删除时返回 count=0 而不抛错，
+        // 不会把整个成功事务拖成 failed（产物照样落 NodeRun）
+        prisma.canvasNode.updateMany({
           where: { id: nodeId },
           data: {
             data: JSON.stringify({

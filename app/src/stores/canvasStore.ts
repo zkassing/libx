@@ -621,7 +621,7 @@ export const useCanvasStore = create<CanvasState>()(
           let attempt = 0;
           for (;;) {
             attempt += 1;
-            const res = await fetch(`/api/nodes/${id}/run`, { method: "POST" });
+            const res = await fetch(`/api/nodes/${id}/run?force=1`, { method: "POST" });
             let j: { runId?: string; error?: string };
             try {
               j = await res.json();
