@@ -283,8 +283,14 @@ export const arkImageProvider: GenProvider = {
       const urls = await withProgress(
         arkImage(model, prompt, {
           size: scaleSize(RATIO_SIZE[ratio] ?? RATIO_SIZE["16:9"], resolution),
-          // `@引用` 的参考图（被引用节点产物 / 标记图 / 角色参考图）→ 图生图
-          referenceImages: input.referenceImages,
+          // 参考图 = 上游连线的图片产物 + `@引用`（被引用节点产物 / 标记图 / 角色参考图）。
+          // 之前只传了 @引用——上游图片只进了文本摘要（一段 url 文字），
+          // 模型根本看不到图，多图合成（「图1的模特枕着图2的枕头」）必然跑飞。
+          // 数组顺序即模型的「图1、图2…」，与 upstreams 的连线创建顺序一致。
+          referenceImages: dedupeUrls([
+            ...upstreamImages(input),
+            ...(input.referenceImages ?? []),
+          ]),
           signal: ctx.signal,
         }),
         ctx.onProgress,
@@ -300,6 +306,18 @@ export const arkImageProvider: GenProvider = {
     return { kind: input.nodeKind, urls: all };
   },
 };
+
+/** 上游连线的图片产物 urls（多图合成：全部作为参考图传给模型） */
+function upstreamImages(input: GenInput): string[] {
+  return (input.upstreams ?? [])
+    .filter((u) => u.kind === "image")
+    .flatMap((u) => u.urls ?? []);
+}
+
+/** 同一张图既连线又 @引用时只传一次（保序去重） */
+function dedupeUrls(urls: string[]): string[] {
+  return [...new Set(urls)];
+}
 
 /* ------------------------------ 视频 ------------------------------ */
 
