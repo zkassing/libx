@@ -635,9 +635,15 @@ export const useCanvasStore = create<CanvasState>()(
               continue;
             }
 
-            // 上游未就绪 / 无权限等业务错误（409/403/404）：展示并中止
+            // 上游未就绪 / 无权限等业务错误（409/403/404）：展示并中止。
+            // 若云端同步已失败（幽灵画布），优先显示根因而非「节点不存在」表象
             if (!res.ok || !j.runId) {
-              set({ connectionError: j.error ?? "运行失败" });
+              const cs = get();
+              const msg =
+                cs.cloudStatus === "error" && cs.cloudError
+                  ? cs.cloudError
+                  : j.error ?? "运行失败";
+              set({ connectionError: msg });
               return;
             }
 
@@ -910,10 +916,25 @@ export const useCanvasStore = create<CanvasState>()(
             cloudStatus: "ready",
           });
         } catch (e) {
-          // 加载失败：留在本地兑底缓存（localStorage 已由 persist 提供）
+          // 加载失败分两类：
+          // - 404/403（画布被删 / 不属于当前账号）：本地 persist 的残留节点
+          //   绝不能留——留下了就是「幽灵画布」：看得到、点得动，
+          //   但保存/运行永远 404，用户对着空气工作。清空 + 明确报错。
+          // - 网络/5xx（抖动）：保留本地兜底缓存，重试还有机会。
+          const status = /\((\d{3})\)/.exec(
+            e instanceof Error ? e.message : "",
+          )?.[1];
+          const gone = status === "404" || status === "403";
           set({
+            ...(gone
+              ? { nodes: [], edges: [], past: [], future: [], selectedNodeId: null }
+              : {}),
             cloudStatus: "error",
-            cloudError: e instanceof Error ? e.message : "加载失败",
+            cloudError: gone
+              ? "画布不存在或不属于当前账号（请从项目页重新进入）"
+              : e instanceof Error
+                ? e.message
+                : "加载失败",
           });
         }
       },
@@ -934,7 +955,14 @@ export const useCanvasStore = create<CanvasState>()(
               edges: s.edges,
             }),
           });
-          if (!res.ok) throw new Error(`保存失败 (${res.status})`);
+          if (!res.ok) {
+            // 404 = 画布被删/不属于当前账号：给出能行动的文案，不只是状态码
+            throw new Error(
+              res.status === 404
+                ? "画布不存在或不属于当前账号（请从项目页重新进入）"
+                : `保存失败 (${res.status})`,
+            );
+          }
           const data = (await res.json()) as { savedAt: string };
           set({ cloudStatus: "saved", savedAt: data.savedAt });
         } catch (e) {
